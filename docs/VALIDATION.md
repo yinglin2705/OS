@@ -20,3 +20,12 @@
 - DFPI 初始 Excel 迁移（未收到上传文件）。
 
 需要你配置项目与 Bot 后，按 README 的全链路步骤继续验证。部署配置已保存为云环境草稿，但尚未发布；这与 Vercel / Supabase 部署是两个独立操作。
+
+## 通知后台自动部署准备
+
+- 新增固定 Supabase CLI 2.121.0 的自动部署命令与手动触发的 GitHub Actions 工作流。
+- 当前 `npm test`：**50 项通过**，包括 secret 保留/摘要核对、受保护的 webhook 管理、模拟完整部署、重复部署和只读验证；模拟服务不发送真实消息。
+- PostgreSQL 集成检查增加 Cron API stub：重复执行安装 SQL，不增加任务；重用旧任务、停用同 worker 重复项、保留无关任务、没有在 Cron command 中内嵌密钥。
+- 新的 TypeScript、Deno Edge 类型检查与应用生产构建通过。
+- 实际 CLI 远程检查停止在缺少 Management API 授权；该云机器访问 Supabase 管理接口仍遭网络代理 403。没有取得最新远程函数/JWT/Cron状态，也没有完成真实函数部署或 Telegram 发送。
+- GitHub Actions 需要在保护的 repository secret 中提供 SUPABASE_ACCESS_TOKEN 并手动触发；授权不通过聊天传递。已有 Supabase Bot token 会在 Edge runtime 内复用。

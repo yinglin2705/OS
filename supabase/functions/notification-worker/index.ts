@@ -1,3 +1,4 @@
+import { telegramAdmin, type AdminAction } from "../_shared/telegram-admin.ts";
 import { db, json, sendTelegram } from "../_shared/db.ts";
 import { briefing, quietUntil, splitMessage } from "../_shared/core.ts";
 Deno.serve(async (req: Request) => {
@@ -5,6 +6,24 @@ Deno.serve(async (req: Request) => {
   const secret = Deno.env.get("SCHEDULER_SECRET");
   if (!secret || req.headers.get("Authorization") !== `Bearer ${secret}`)
     return json({ error: "Unauthorized" }, 401);
+  let payload: { action?: string };
+  try {
+    payload = await req.json();
+  } catch {
+    return json({ error: "Bad JSON" }, 400);
+  }
+  if (!payload || typeof payload !== "object" || Array.isArray(payload))
+    return json({ error: "Bad JSON" }, 400);
+  if (payload.action) {
+    if (
+      !["health", "webhook-info", "configure-webhook"].includes(payload.action)
+    )
+      return json({ error: "Unknown administrative action" }, 400);
+    const result = await telegramAdmin(payload.action as AdminAction, (name) =>
+      Deno.env.get(name),
+    );
+    return json(result.body, result.status);
+  }
   const client = db();
   const now = new Date().toISOString();
   const { error: enqueueError } = await client.rpc("enqueue_due");

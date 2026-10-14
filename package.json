@@ -8,7 +8,8 @@
     "start": "next start --hostname 0.0.0.0",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "test:db": "bash scripts/test-db.sh"
+    "test:db": "bash scripts/test-db.sh",
+    "deploy:notifications": "node scripts/deploy-notifications.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.6.1",

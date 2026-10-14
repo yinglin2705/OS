@@ -11,3 +11,8 @@ done
 docker exec -i "$ying_db" psql -U postgres -v ON_ERROR_STOP=1 < tests/db-bootstrap.sql
 docker exec -i "$ying_db" psql -U postgres -v ON_ERROR_STOP=1 < supabase/migrations/001_ying_os.sql
 docker exec -i "$ying_db" psql -U postgres -v ON_ERROR_STOP=1 < tests/database.sql
+docker exec -i "$ying_db" psql -U postgres -v ON_ERROR_STOP=1 < tests/cron-before.sql
+for attempt in 1 2; do
+  docker exec -i "$ying_db" psql -U postgres -v ON_ERROR_STOP=1 < supabase/cron.sql
+  docker exec -i "$ying_db" psql -U postgres -v ON_ERROR_STOP=1 < tests/cron-after.sql
+done

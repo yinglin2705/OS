@@ -48,6 +48,8 @@ npm start
 
 ## 部署到 Supabase 与 Vercel
 
+**通知后台已新增一次授权的自动部署流程**：[自动部署说明](docs/NOTIFICATION_DEPLOYMENT.md)。迁移已成功时直接使用该流程，不必再次执行迁移或手工复制函数。
+
 1. **创建 Supabase 项目**。在 SQL Editor 执行 `supabase/migrations/001_ying_os.sql` 一次，或使用已登录的 Supabase CLI：
 
    ```bash

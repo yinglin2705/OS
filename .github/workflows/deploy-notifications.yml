@@ -1,0 +1,43 @@
+name: Deploy Supabase notifications
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Inspect existing state, deploy, or verify delivery infrastructure
+        required: true
+        default: deploy
+        type: choice
+        options: [inspect, deploy, verify]
+permissions:
+  contents: read
+concurrency:
+  group: ying-os-supabase-notifications
+  cancel-in-progress: false
+jobs:
+  notifications:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SCHEDULER_SECRET: ${{ secrets.SCHEDULER_SECRET }}
+      SUPABASE_HOME: ${{ runner.temp }}/ying-supabase-auth
+      DO_NOT_TRACK: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Check authorization presence without printing its value
+        run: node -e "if(!process.env.SUPABASE_ACCESS_TOKEN){console.error('Configure the protected Actions secret SUPABASE_ACCESS_TOKEN; never paste it in chat.');process.exit(1)}"
+      - run: npm ci
+      - run: npm test
+      - name: Inspect, deploy or verify
+        env:
+          DEPLOY_MODE: ${{ inputs.mode }}
+        run: |
+          case "$DEPLOY_MODE" in
+            inspect) npm run deploy:notifications -- --inspect ;;
+            deploy) npm run deploy:notifications ;;
+            verify) npm run deploy:notifications -- --verify ;;
+          esac

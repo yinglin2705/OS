@@ -106,6 +106,30 @@ async function rows(params) {
   return parseRows(await cli([...params, "--agent", "no", "-o", "json"]));
 }
 async function query(sql) {
+  if (process.env.SUPABASE_ACCESS_TOKEN) {
+    // CLI --linked still probes a discarded TCP connection. Use HTTPS directly in CI.
+    const response = await fetch(
+      `https://api.supabase.com/v1/projects/${ref}/database/query`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${process.env.SUPABASE_ACCESS_TOKEN}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ query: sql }),
+        signal: AbortSignal.timeout(90000),
+      },
+    );
+    const body = await response.json();
+    if (!response.ok)
+      throw new Error(
+        redact(
+          `Management database query failed (HTTP ${response.status}): ${typeof body.message === "string" ? body.message : typeof body.error === "string" ? body.error : "request rejected"}`,
+          known,
+        ),
+      );
+    return parseRows(JSON.stringify(body));
+  }
   const path = join(folder, `query-${++fileCounter}.sql`);
   await writeFile(path, sql, { mode: 0o600 });
   try {
@@ -210,6 +234,9 @@ try {
     );
   report.delivery_before = await deliveryState();
   say(`Current delivery state: ${JSON.stringify(report.delivery_before)}`);
+  report.binding_before = await query(
+    "select count(*) filter(where consumed_at is not null) as consumed_codes,max(consumed_at) as last_consumed_at,count(*) filter(where consumed_at is null and expires_at>now()) as usable_codes,count(*) filter(where consumed_at is null and expires_at<=now()) as expired_codes from public.telegram_link_codes;",
+  );
   if (inspect) {
     say(
       "Read-only inspection complete. No functions, secrets, webhook or Cron jobs changed.",
@@ -327,6 +354,8 @@ try {
       verified: webhook.url_matches,
       bot_username: webhook.bot_username,
       pending_updates: webhook.pending_updates,
+      last_error_date: webhook.last_error_date,
+      last_error_http_status: webhook.last_error_http_status,
     };
     say(
       `Webhook verified; bot @${webhook.bot_username || "unknown"}, queued Telegram updates ${webhook.pending_updates}.`,
@@ -349,7 +378,51 @@ try {
       report.worker = await edge();
       say(`Initial worker run: ${JSON.stringify(report.worker)}`);
     }
+    report.binding_after = await query(
+      "select count(*) filter(where consumed_at is not null) as consumed_codes,max(consumed_at) as last_consumed_at,count(*) filter(where consumed_at is null and expires_at>now()) as usable_codes,count(*) filter(where consumed_at is null and expires_at<=now()) as expired_codes from public.telegram_link_codes;",
+    );
     report.delivery_after = await deliveryState();
+    if (process.env.SUPABASE_ACCESS_TOKEN) {
+      const logURL = new URL(
+        `https://api.supabase.com/v1/projects/${ref}/analytics/endpoints/logs`,
+      );
+      logURL.searchParams.set(
+        "iso_timestamp_start",
+        new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
+      );
+      logURL.searchParams.set("iso_timestamp_end", new Date().toISOString());
+      logURL.searchParams.set(
+        "sql",
+        "select regexp_extract(event_message, r'\\|\\s*([0-9]{3})\\s*\\|') as http_status,count(*) as requests from function_edge_logs where event_message like '%/telegram-webhook%' group by http_status",
+      );
+      try {
+        const response = await fetch(logURL, {
+          headers: {
+            Authorization: `Bearer ${process.env.SUPABASE_ACCESS_TOKEN}`,
+          },
+          signal: AbortSignal.timeout(20000),
+        });
+        const body = await response.json();
+        report.webhook_request_logs =
+          response.ok && !body.error && Array.isArray(body.result)
+            ? body.result.map((row) => ({
+                http_status:
+                  row.http_status === null
+                    ? null
+                    : String(row.http_status)
+                        .replace(/[^0-9]/g, "")
+                        .slice(0, 3),
+                requests: Number(row.requests) || 0,
+              }))
+            : { unverified: true, http_status: response.status };
+      } catch {
+        report.webhook_request_logs = {
+          unverified: true,
+          reason: "Analytics logs request unavailable",
+        };
+      }
+    }
+
     say(`Delivery state: ${JSON.stringify(report.delivery_after)}`);
     say(
       "Deployment/verification checks passed. This does not prove a real message was received.",
@@ -364,7 +437,10 @@ try {
   const safeError = redact(error.message, known);
   console.error(safeError);
   if (process.env.GITHUB_ACTIONS === "true") {
-    const annotation = safeError.replaceAll("%", "%25").replaceAll("\r", "%0D").replaceAll("\n", "%0A");
+    const annotation = safeError
+      .replaceAll("%", "%25")
+      .replaceAll("\r", "%0D")
+      .replaceAll("\n", "%0A");
     console.log(`::error title=Notification deployment failed::${annotation}`);
   }
   console.error(
@@ -372,6 +448,13 @@ try {
   );
   process.exitCode = 1;
 } finally {
+  if (process.env.GITHUB_ACTIONS === "true") {
+    const safeReport = JSON.stringify(report)
+      .replaceAll("%", "%25")
+      .replaceAll("\r", "%0D")
+      .replaceAll("\n", "%0A");
+    console.log(`::notice title=YING OS deployment checks::${safeReport}`);
+  }
   if (process.env.GITHUB_STEP_SUMMARY) {
     await appendFile(
       process.env.GITHUB_STEP_SUMMARY,

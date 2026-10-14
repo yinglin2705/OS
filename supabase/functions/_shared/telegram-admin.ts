@@ -67,6 +67,10 @@ export async function telegramAdmin(
         url_matches: latest.url === expected,
         pending_updates: latest.pending_update_count || 0,
         last_error_date: latest.last_error_date || null,
+        last_error_http_status:
+          String(latest.last_error_message || "").match(
+            /webhook:\s*([45]\d{2})\b/i,
+          )?.[1] || null,
         bot_username: bot.username || null,
       },
     };

@@ -97,6 +97,15 @@ else if (args[0] === "secrets" && args[1] === "set") {
     ];
     emit([{ cron_configured: true }]);
   } else if (sql.includes("from cron.job")) emit(state.jobs);
+  else if (sql.includes("consumed_codes"))
+    emit([
+      {
+        consumed_codes: 0,
+        last_consumed_at: null,
+        usable_codes: 0,
+        expired_codes: 0,
+      },
+    ]);
   else if (sql.includes("linked_accounts"))
     emit([
       {

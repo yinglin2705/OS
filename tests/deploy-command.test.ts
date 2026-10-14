@@ -49,6 +49,7 @@ describe("full deployment command with simulated service boundaries", () => {
             ...process.env,
             npm_execpath: resolve("tests/fixtures/notification-cli.mjs"),
             YING_TEST_DEPLOY_STATE: path,
+            SUPABASE_ACCESS_TOKEN: "fake-management-token",
             GITHUB_STEP_SUMMARY: join(dir, "summary.md"),
           },
           timeout: 30000,
@@ -79,6 +80,14 @@ describe("full deployment command with simulated service boundaries", () => {
   it("deploys both functions, preserves the bot, configures one minute job and logs no secret values", async () => {
     const result = await fixture([]);
     expect(result.state.functions).toHaveLength(2);
+    expect(result.state.commands.some((c: string[]) => c[0] === "db")).toBe(
+      false,
+    );
+    expect(
+      result.state.commands.some(
+        (c: string[]) => c[0] === "management" && c[1] === "query",
+      ),
+    ).toBe(true);
     expect(
       result.state.functions.every(
         (f: { verify_jwt: boolean }) => f.verify_jwt === false,

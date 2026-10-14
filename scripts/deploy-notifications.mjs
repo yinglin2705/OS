@@ -1,5 +1,12 @@
 import { spawn } from "node:child_process";
-import { mkdtemp, writeFile, readFile, rm, chmod } from "node:fs/promises";
+import {
+  mkdtemp,
+  writeFile,
+  readFile,
+  rm,
+  chmod,
+  appendFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -31,6 +38,11 @@ const worker = `${base}/functions/v1/notification-worker`;
 const folder = await mkdtemp(join(tmpdir(), "ying-deploy-"));
 await chmod(folder, 0o700);
 let fileCounter = 0;
+const report = {
+  status: "running",
+  project_ref: ref,
+  mode: inspect ? "inspect" : verify ? "verify" : "deploy",
+};
 const say = (message) => console.log(redact(message, known));
 
 async function cli(params, interactive = false) {
@@ -196,7 +208,8 @@ try {
     query(
       "select (select count(*) from public.telegram_connections) as linked_accounts,(select count(*) from public.notification_deliveries where state='sent') as delivered_count,(select count(*) from public.notification_deliveries where state='pending') as pending_count,(select count(*) from public.notification_deliveries where state='failed') as failed_count,(select count(*) from public.notification_deliveries where state='uncertain') as uncertain_count,(select max(delivered_at) from public.notification_deliveries where state='sent') as latest_delivered_at;",
     );
-  say(`Current delivery state: ${JSON.stringify(await deliveryState())}`);
+  report.delivery_before = await deliveryState();
+  say(`Current delivery state: ${JSON.stringify(report.delivery_before)}`);
   if (inspect) {
     say(
       "Read-only inspection complete. No functions, secrets, webhook or Cron jobs changed.",
@@ -291,6 +304,13 @@ try {
     }
     functions = await rows(["functions", "list", "--project-ref", ref]);
     assertFunctions(functions);
+    report.functions = functions
+      .filter((f) => FUNCTIONS.includes(f.slug || f.name))
+      .map((f) => ({
+        name: f.slug || f.name,
+        status: f.status,
+        verify_jwt: f.verify_jwt,
+      }));
     await jwtProbe();
     say(
       "Both functions are ACTIVE, JWT gateway verification disabled, and application-level authorization verified.",
@@ -303,6 +323,11 @@ try {
       throw new Error(
         "Telegram webhook is not targeting the expected function.",
       );
+    report.webhook = {
+      verified: webhook.url_matches,
+      bot_username: webhook.bot_username,
+      pending_updates: webhook.pending_updates,
+    };
     say(
       `Webhook verified; bot @${webhook.bot_username || "unknown"}, queued Telegram updates ${webhook.pending_updates}.`,
     );
@@ -318,9 +343,14 @@ try {
       jobs.find((j) => j.active)?.schedule !== "* * * * *"
     )
       throw new Error("Exactly one active minute Cron job was not confirmed.");
+    report.cron = jobs;
     say(`Cron verified: ${JSON.stringify(jobs)}`);
-    if (!verify) say(`Initial worker run: ${JSON.stringify(await edge())}`);
-    say(`Delivery state: ${JSON.stringify(await deliveryState())}`);
+    if (!verify) {
+      report.worker = await edge();
+      say(`Initial worker run: ${JSON.stringify(report.worker)}`);
+    }
+    report.delivery_after = await deliveryState();
+    say(`Delivery state: ${JSON.stringify(report.delivery_after)}`);
     say(
       "Deployment/verification checks passed. This does not prove a real message was received.",
     );
@@ -328,12 +358,20 @@ try {
       `Open YING OS → 设置与通知 → 连接 Telegram, send the one-time code privately to @${webhook.bot_username || "your bot"}, then check the actual received message and sent delivery history. Quiet hours still apply.`,
     );
   }
+  report.status = "passed";
 } catch (error) {
+  report.status = "failed";
   console.error(redact(error.message, known));
   console.error(
     "No credentials should be pasted into chat. Local authorization: npm exec --yes --package=supabase@2.121.0 -- supabase login. For CI use the protected GitHub Actions secret SUPABASE_ACCESS_TOKEN.",
   );
   process.exitCode = 1;
 } finally {
+  if (process.env.GITHUB_STEP_SUMMARY) {
+    await appendFile(
+      process.env.GITHUB_STEP_SUMMARY,
+      `## YING OS notification deployment\n\nVerified infrastructure results; no credential values or chat IDs. A successful deployment does not prove actual message receipt.\n\n\`\`\`json\n${JSON.stringify(report, null, 2)}\n\`\`\`\n`,
+    );
+  }
   await rm(folder, { recursive: true, force: true });
 }

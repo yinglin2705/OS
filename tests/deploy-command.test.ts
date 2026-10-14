@@ -49,6 +49,7 @@ describe("full deployment command with simulated service boundaries", () => {
             ...process.env,
             npm_execpath: resolve("tests/fixtures/notification-cli.mjs"),
             YING_TEST_DEPLOY_STATE: path,
+            GITHUB_STEP_SUMMARY: join(dir, "summary.md"),
           },
           timeout: 30000,
         },
@@ -56,6 +57,7 @@ describe("full deployment command with simulated service boundaries", () => {
       return {
         stdout,
         stderr,
+        summary: await readFile(join(dir, "summary.md"), "utf8"),
         state: JSON.parse(await readFile(path, "utf8")),
         initial,
       };
@@ -87,6 +89,12 @@ describe("full deployment command with simulated service boundaries", () => {
       result.state.jobs.filter((j: { active: boolean }) => j.active),
     ).toHaveLength(1);
     expect(result.stdout).not.toContain(result.state.secrets.SCHEDULER_SECRET);
+    expect(result.summary).not.toContain(result.state.secrets.SCHEDULER_SECRET);
+    expect(result.summary).not.toContain(
+      result.state.secrets.TELEGRAM_WEBHOOK_SECRET,
+    );
+    expect(result.summary).not.toContain("fake-test-bot-token");
+    expect(result.summary).toContain('"verify_jwt": false');
     expect(result.stdout).not.toContain(
       result.state.secrets.TELEGRAM_WEBHOOK_SECRET,
     );

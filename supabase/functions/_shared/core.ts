@@ -302,3 +302,12 @@ export function layoutDay<T extends CalendarEvent>(
   finish();
   return items;
 }
+
+/** Normalize copied codes only; validity and expiry remain enforced by consume_link. */
+export function parseLinkCode(text: unknown): string | null {
+  if (typeof text !== "string") return null;
+  const match = text
+    .trim()
+    .match(/^(?:\/start(?:@[A-Za-z0-9_]+)?\s+)?(YING-[A-F0-9]{24})$/i);
+  return match ? match[1].toUpperCase() : null;
+}

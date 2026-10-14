@@ -39,7 +39,15 @@ else if (args[0] === "secrets" && args[1] === "set") {
   emit({ ok: true });
 } else if (args[0] === "db" && args[1] === "query") {
   const sql = readFileSync(args[args.indexOf("--file") + 1], "utf8");
-  if (sql.includes("missing_tables"))
+  if (sql.includes("as cron_history"))
+    emit([{ cron_history: true, net_responses: true }]);
+  else if (sql.includes("from cron.job_run_details"))
+    emit([{ latest_success: "2026-10-14T23:00:00Z", recent_failures: 0 }]);
+  else if (sql.includes("from net._http_response"))
+    emit([
+      { created: "2026-10-14T23:00:00Z", status_code: 200, timed_out: false },
+    ]);
+  else if (sql.includes("missing_tables"))
     emit([
       {
         cron_exists: state.cronExists,

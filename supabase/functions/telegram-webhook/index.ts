@@ -1,5 +1,5 @@
 import { db, json } from "../_shared/db.ts";
-import { authorizedWebhook } from "../_shared/core.ts";
+import { authorizedWebhook, parseLinkCode } from "../_shared/core.ts";
 Deno.serve(async (req: Request) => {
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
   const expected = Deno.env.get("TELEGRAM_WEBHOOK_SECRET");
@@ -24,15 +24,39 @@ Deno.serve(async (req: Request) => {
     )
   )
     return json({ ok: true });
-  const match = String(message.text || "").match(
-    /^(?:\/start\s+)?(YING-[A-F0-9]{24})$/,
-  );
-  if (!match || message.from?.id !== message.chat.id) return json({ ok: true }); // Silent to unsolicited, unlinked chats.
-  const { error } = await db().rpc("consume_link", {
-    code: match[1],
+  const code = parseLinkCode(message.text);
+  if (message.from?.id !== message.chat.id) return json({ ok: true });
+  if (!code) {
+    console.info(
+      JSON.stringify({
+        kind: "ying_telegram_link",
+        outcome: "unsupported_code_format",
+      }),
+    );
+    return json({ ok: true });
+  }
+  const { data, error } = await db().rpc("consume_link", {
+    code,
     private_chat: message.chat.id,
   });
-  if (error) return json({ error: "Link operation failed" }, 500);
+  if (error) {
+    console.info(
+      JSON.stringify({
+        kind: "ying_telegram_link",
+        outcome: "rpc_failed",
+        error_code: String(error.code || "")
+          .replace(/[^A-Z0-9]/g, "")
+          .slice(0, 5),
+      }),
+    );
+    return json({ error: "Link operation failed" }, 500);
+  }
+  console.info(
+    JSON.stringify({
+      kind: "ying_telegram_link",
+      outcome: data ? "linked" : "expired_or_unknown_code",
+    }),
+  );
   // Test is durably queued; the next cron invocation sends it, even after this request exits.
   return json({ ok: true });
 });

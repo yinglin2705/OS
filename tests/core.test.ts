@@ -252,3 +252,22 @@ describe("calendar lanes", () => {
     expect(overnight[0].end).toBe(120);
   });
 });
+
+describe("private linking code parsing", () => {
+  it("accepts copied whitespace and canonicalizes hex case without exposing code content", async () => {
+    const { parseLinkCode } =
+      await import("../supabase/functions/_shared/core");
+    const code = "YING-" + "A".repeat(24);
+    expect(parseLinkCode(" \n" + code + "\n ")).toBe(code);
+    expect(
+      parseLinkCode("/start@ying_os_calendar_bot " + code.toLowerCase()),
+    ).toBe(code);
+  });
+  it("rejects incomplete codes and unrelated text", async () => {
+    const { parseLinkCode } =
+      await import("../supabase/functions/_shared/core");
+    expect(parseLinkCode("YING-short")).toBeNull();
+    expect(parseLinkCode("please connect me")).toBeNull();
+    expect(parseLinkCode(null)).toBeNull();
+  });
+});

@@ -382,6 +382,18 @@ try {
       "select count(*) filter(where consumed_at is not null) as consumed_codes,max(consumed_at) as last_consumed_at,count(*) filter(where consumed_at is null and expires_at>now()) as usable_codes,count(*) filter(where consumed_at is null and expires_at<=now()) as expired_codes from public.telegram_link_codes;",
     );
     report.delivery_after = await deliveryState();
+    const [runtimeTables] = await query(
+      "select to_regclass('cron.job_run_details') is not null as cron_history,to_regclass('net._http_response') is not null as net_responses;",
+    );
+    if (runtimeTables.cron_history)
+      report.cron_runtime = await query(
+        "select max(end_time) filter(where status='succeeded') as latest_success,count(*) filter(where status='failed' and start_time>now()-interval '15 minutes') as recent_failures from cron.job_run_details where jobid in (select jobid from cron.job where active and command like '%ying_worker_url%');",
+      );
+    if (runtimeTables.net_responses)
+      report.worker_background = await query(
+        "select created,status_code,timed_out from net._http_response where status_code=200 and content like '{\"claimed\":%' and content like '%\"sent\":%' order by created desc limit 3;",
+      );
+
     if (process.env.SUPABASE_ACCESS_TOKEN) {
       const logURL = new URL(
         `https://api.supabase.com/v1/projects/${ref}/analytics/endpoints/logs`,
@@ -414,7 +426,17 @@ try {
                         .slice(0, 3),
                 requests: Number(row.requests) || 0,
               }))
-            : { unverified: true, http_status: response.status };
+            : {
+                unverified: true,
+                http_status: response.status,
+                reason: redact(
+                  typeof body.error === "string"
+                    ? body.error
+                    : body.error?.message ||
+                        "No supported analytics rows returned",
+                  known,
+                ).slice(0, 350),
+              };
       } catch {
         report.webhook_request_logs = {
           unverified: true,

@@ -2,7 +2,7 @@ name: Deploy Supabase notifications
 on:
   push:
     branches: [main]
-    paths: [.github/workflows/deploy-notifications.yml]
+    paths: [.github/workflows/deploy-notifications.yml, scripts/deploy-notifications.mjs]
   workflow_dispatch:
     inputs:
       mode:

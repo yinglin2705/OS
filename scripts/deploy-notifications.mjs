@@ -361,7 +361,12 @@ try {
   report.status = "passed";
 } catch (error) {
   report.status = "failed";
-  console.error(redact(error.message, known));
+  const safeError = redact(error.message, known);
+  console.error(safeError);
+  if (process.env.GITHUB_ACTIONS === "true") {
+    const annotation = safeError.replaceAll("%", "%25").replaceAll("\r", "%0D").replaceAll("\n", "%0A");
+    console.log(`::error title=Notification deployment failed::${annotation}`);
+  }
   console.error(
     "No credentials should be pasted into chat. Local authorization: npm exec --yes --package=supabase@2.121.0 -- supabase login. For CI use the protected GitHub Actions secret SUPABASE_ACCESS_TOKEN.",
   );

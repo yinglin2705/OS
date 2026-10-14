@@ -11,7 +11,7 @@
 
 此工作流需要你保存授权并启动后才会执行。推送代码、绿色本地测试或已保存环境草稿都不代表函数上线或真实消息送达。当前 Codex 云机器没有账号管理授权，且其网络代理阻断 Supabase 管理接口；GitHub 执行器可绕开这台机器的网络入口限制。
 
-main 分支修改 `.github/workflows/deploy-notifications.yml` 时会自动执行 deploy；其他代码推送不会自动启动通知部署。`SUPABASE_HOME` 在 step 中由 `RUNNER_TEMP` 初始化并写入 `GITHUB_ENV`，不使用 job 级 runner context。工作流 Summary 提供不含密钥和 chat ID 的部署核查结果。
+main 分支修改 `.github/workflows/deploy-notifications.yml` 或 `scripts/deploy-notifications.mjs` 时会自动执行 deploy；其他代码推送不会自动启动通知部署。`SUPABASE_HOME` 在 step 中由 `RUNNER_TEMP` 初始化并写入 `GITHUB_ENV`，不使用 job 级 runner context。工作流 Summary 提供不含密钥和 chat ID 的部署核查结果。
 
 ## 自动化流程做什么
 

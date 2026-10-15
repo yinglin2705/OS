@@ -42,7 +42,8 @@ jobs:
       - run: npm test
       - name: Inspect, deploy or verify
         env:
-          DEPLOY_MODE: ${{ inputs.mode || 'deploy' }}
+          # A marked push permits read-only verification when API dispatch is unavailable.
+          DEPLOY_MODE: ${{ inputs.mode || (github.event_name == 'push' && contains(github.event.head_commit.message, '[verify-notifications]') && 'verify') || 'deploy' }}
         run: |
           case "$DEPLOY_MODE" in
             inspect) npm run deploy:notifications -- --inspect ;;

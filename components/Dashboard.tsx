@@ -944,6 +944,9 @@ export default function Dashboard({
               {categories[selected.category]} · {statusLabels[selected.status]}
             </p>
             <h2>{selected.title}</h2>
+            <a className="primary board-open" href={`/events/${selected.id}/board`}>
+              打开事件看板 ↗
+            </a>
             <dl>
               {[
                 [

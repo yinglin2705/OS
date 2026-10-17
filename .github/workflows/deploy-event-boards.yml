@@ -1,0 +1,27 @@
+name: Deploy private event boards
+on:
+  push:
+    branches: [main]
+    paths:
+      - supabase/migrations/002_event_boards.sql
+      - scripts/deploy-event-boards.mjs
+      - .github/workflows/deploy-event-boards.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ying-os-event-boards-schema
+  cancel-in-progress: false
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Apply additive board schema and verify privacy
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: node scripts/deploy-event-boards.mjs

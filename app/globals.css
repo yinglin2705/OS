@@ -948,3 +948,25 @@ td:last-child {
     gap: 14px;
   }
 }
+
+/* Private event research boards */
+.board-page { max-width: 1500px; margin: auto; padding: 32px 24px; }
+.board-open { display: inline-block; margin-bottom: 20px; text-decoration: none; }
+.board-composer { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 16px; }
+.board-composer label,.board-links label { display: grid; gap: 8px; }
+.board-composer textarea { min-height: 90px; }
+.board-links { display: flex; gap: 16px; align-items: end; flex-wrap: wrap; }
+.board-links label { flex: 1; min-width: 180px; }
+.board-viewport { height: 70vh; min-height: 450px; overflow: auto; border: 1px solid var(--line); border-radius: 14px; margin: 24px 0; }
+.board-canvas { position: relative; width: 2000px; height: 2000px; background-color: var(--bg); background-image: radial-gradient(#8b9d973a 1px,transparent 1px); background-size: 22px 22px; }
+.board-wires { position: absolute; inset: 0; pointer-events: none; }
+.board-wires line { stroke: #a16d59; stroke-width: 2; }
+.board-card { position: absolute; width: 270px; padding: 12px; border-radius: 10px; background: var(--surface); color: var(--text); border: 1px solid var(--line); box-shadow: 0 6px 20px #0000000c; display: grid; gap: 10px; }
+.board-card img { width: 100%; max-height: 240px; object-fit: contain; border-radius: 6px; }
+.board-card input,.board-card textarea { width: 100%; min-width: 0; }
+.board-card textarea { min-height: 110px; resize: vertical; }
+.board-card .board-drag { cursor: grab; touch-action: none; font-size: 13px; }
+.board-drag:active { cursor: grabbing; }
+.board-empty { position: absolute; top: 40px; left: 40px; }
+[data-theme="dark"] .board-card { background: #202a26; }
+@media(max-width: 650px) { .board-page { padding: 20px 12px; } .board-composer { grid-template-columns: 1fr; } }

@@ -2,18 +2,29 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { browserDB, configured } from "@/lib/supabase";
+import { dragPosition, zoomValue, nextCardPosition } from "@/lib/knowledge";
 type Card = {
   id: string;
-  kind: "note" | "link" | "image";
+  kind: "note" | "link" | "image" | "pdf";
   title: string;
   body: string;
   url: string | null;
   image_path: string | null;
+  original_filename: string | null;
+  color: "yellow" | "pink" | "blue" | "green";
   x: number;
   y: number;
   signedURL?: string;
 };
 type Edge = { id: string; from_card: string; to_card: string };
+const types = { note: "便签", image: "图片", link: "链接", pdf: "PDF" };
+const mimes: Record<string, string> = {
+  "image/png": "png",
+  "image/jpeg": "jpg",
+  "image/webp": "webp",
+  "image/gif": "gif",
+  "application/pdf": "pdf",
+};
 export default function EventBoard({ eventId }: { eventId: string }) {
   const [userId, setUserId] = useState(""),
     [title, setTitle] = useState("事件看板"),
@@ -21,14 +32,22 @@ export default function EventBoard({ eventId }: { eventId: string }) {
     [edges, setEdges] = useState<Edge[]>([]);
   const [message, setMessage] = useState("正在读取…"),
     [busy, setBusy] = useState(false),
-    [kind, setKind] = useState<Card["kind"]>("note");
-  const [newTitle, setNewTitle] = useState(""),
+    [composer, setComposer] = useState(false),
+    [linker, setLinker] = useState(false),
+    [zoom, setZoom] = useState(1);
+  const [kind, setKind] = useState<Card["kind"]>("note"),
+    [newTitle, setNewTitle] = useState(""),
     [body, setBody] = useState(""),
     [url, setURL] = useState(""),
-    [file, setFile] = useState<File | null>(null);
+    [file, setFile] = useState<File | null>(null),
+    [color, setColor] = useState<Card["color"]>("yellow"),
+    [editing, setEditing] = useState<Card | null>(null);
   const [from, setFrom] = useState(""),
     [to, setTo] = useState("");
-  const fileInput = useRef<HTMLInputElement>(null);
+  const focused = useRef(false);
+  const viewport = useRef<HTMLDivElement>(null),
+    fileInput = useRef<HTMLInputElement>(null),
+    lock = useRef(false);
   const drag = useRef<{
     id: string;
     pointer: number;
@@ -37,7 +56,6 @@ export default function EventBoard({ eventId }: { eventId: string }) {
     x: number;
     y: number;
   } | null>(null);
-  const lock = useRef(false);
   async function reload() {
     const db = browserDB();
     const [c, e] = await Promise.all([
@@ -52,14 +70,14 @@ export default function EventBoard({ eventId }: { eventId: string }) {
         .eq("event_id", eventId),
     ]);
     if (c.error || e.error)
-      throw Error("看板无法读取；请确认数据库看板迁移已部署。");
+      throw Error("看板无法读取，请稍后刷新；若持续失败，请检查看板迁移。");
     const data = await Promise.all(
-      (c.data as Card[]).map(async (card) => {
-        if (!card.image_path) return card;
-        const signed = await db.storage
+      (c.data as Card[]).map(async (c) => {
+        if (!c.image_path) return c;
+        const r = await db.storage
           .from("event-board")
-          .createSignedUrl(card.image_path, 3600);
-        return { ...card, signedURL: signed.data?.signedUrl };
+          .createSignedUrl(c.image_path, 3600);
+        return { ...c, signedURL: r.data?.signedUrl };
       }),
     );
     setCards(data);
@@ -73,13 +91,13 @@ export default function EventBoard({ eventId }: { eventId: string }) {
       const {
         data: { user },
       } = await db.auth.getUser();
-      if (!user) throw Error("请先返回日历登录，再打开看板。");
+      if (!user) throw Error("请先返回日历登录。");
       const { data, error } = await db
         .from("events")
         .select("title")
         .eq("id", eventId)
         .single();
-      if (error || !data) throw Error("活动不存在或你没有访问权限。");
+      if (error || !data) throw Error("活动不存在或没有访问权限。");
       if (!active) return;
       setUserId(user.id);
       setTitle(data.title);
@@ -92,6 +110,52 @@ export default function EventBoard({ eventId }: { eventId: string }) {
       active = false;
     };
   }, [eventId]);
+  useEffect(() => {
+    if (focused.current || !cards.length) return;
+    const id = window.location.hash.slice(1);
+    const card = cards.find((c) => `card-${c.id}` === id);
+    if (!card) return;
+    focused.current = true;
+    setZoom(1);
+    requestAnimationFrame(() => {
+      if (viewport.current) {
+        viewport.current.scrollLeft = Math.max(0, card.x - 40);
+        viewport.current.scrollTop = Math.max(0, card.y - 40);
+      }
+    });
+  }, [cards]);
+  function changeZoom(value: number, point?: { x: number; y: number }) {
+    const next = zoomValue(value),
+      el = viewport.current;
+    if (!el) {
+      setZoom(next);
+      return;
+    }
+    const cx = point?.x ?? el.clientWidth / 2,
+      cy = point?.y ?? el.clientHeight / 2;
+    const worldX = (el.scrollLeft + cx) / zoom,
+      worldY = (el.scrollTop + cy) / zoom;
+    setZoom(next);
+    requestAnimationFrame(() => {
+      el.scrollLeft = worldX * next - cx;
+      el.scrollTop = worldY * next - cy;
+    });
+  }
+  useEffect(() => {
+    const el = viewport.current;
+    if (!el) return;
+    const wheel = (e: WheelEvent) => {
+      if (!e.ctrlKey && !e.metaKey) return;
+      e.preventDefault();
+      const r = el.getBoundingClientRect();
+      changeZoom(zoom * (e.deltaY > 0 ? 0.9 : 1.1), {
+        x: e.clientX - r.left,
+        y: e.clientY - r.top,
+      });
+    };
+    el.addEventListener("wheel", wheel, { passive: false });
+    return () => el.removeEventListener("wheel", wheel);
+  }, [zoom, userId]);
   async function action(run: () => Promise<void>) {
     if (lock.current) return;
     lock.current = true;
@@ -101,71 +165,111 @@ export default function EventBoard({ eventId }: { eventId: string }) {
       await run();
       await reload();
     } catch (e) {
-      setMessage(e instanceof Error ? e.message : "保存失败，请重试。");
+      setMessage(e instanceof Error ? e.message : "操作失败，请重试。");
     } finally {
       lock.current = false;
       setBusy(false);
     }
   }
-  async function add() {
+  function startNew(type: Card["kind"]) {
+    setEditing(null);
+    setKind(type);
+    setNewTitle("");
+    setBody("");
+    setURL("");
+    setFile(null);
+    setComposer(true);
+  }
+  function editCard(c: Card) {
+    setEditing(c);
+    setKind(c.kind);
+    setNewTitle(c.title);
+    setBody(c.body);
+    setURL(c.url || "");
+    setColor(c.color || "yellow");
+    setFile(null);
+    setComposer(true);
+  }
+  async function submit() {
     await action(async () => {
       if (!userId) throw Error("请先登录。");
       if (kind === "note" && !newTitle.trim() && !body.trim())
-        throw Error("请输入文字或标题。");
+        throw Error("请写一点内容。");
+      let link: string | null = null;
       if (kind === "link") {
-        let parsed;
         try {
-          parsed = new URL(url);
+          const u = new URL(url);
+          if (!["http:", "https:"].includes(u.protocol)) throw Error();
+          link = u.href;
         } catch {
-          throw Error("请输入完整的 http:// 或 https:// 链接。");
+          throw Error("请输入完整 HTTP(S) 链接。");
         }
-        if (!["http:", "https:"].includes(parsed.protocol))
-          throw Error("仅支持 HTTP(S) 链接。");
       }
-      if (
-        kind === "image" &&
-        (!file ||
-          !["image/png", "image/jpeg", "image/webp", "image/gif"].includes(
-            file.type,
-          ) ||
-          file.size > 8388608)
-      )
-        throw Error("请选择不超过8 MB的 PNG、JPEG、WebP 或 GIF 图片。");
       const db = browserDB();
-      let path: string | null = null;
-      if (kind === "image" && file) {
-        const ext = (
-          {
-            "image/png": "png",
-            "image/jpeg": "jpg",
-            "image/webp": "webp",
-            "image/gif": "gif",
-          } as Record<string, string>
-        )[file.type];
-        path = `${userId}/${eventId}/${crypto.randomUUID()}.${ext}`;
-        const upload = await db.storage
-          .from("event-board")
-          .upload(path, file, { contentType: file.type, upsert: false });
-        if (upload.error)
-          throw Error("图片上传失败，请检查存储配置或文件大小。");
+      if (editing) {
+        const { error } = await db
+          .from("event_board_cards")
+          .update({ title: newTitle.trim(), body, url: link, color })
+          .eq("id", editing.id)
+          .eq("event_id", eventId)
+          .select("id")
+          .single();
+        if (error) throw Error("未能保存修改，草稿已保留。");
+      } else {
+        let path: string | null = null;
+        if (kind === "image" || kind === "pdf") {
+          if (
+            !file ||
+            file.size > 8388608 ||
+            !mimes[file.type] ||
+            (kind === "pdf"
+              ? file.type !== "application/pdf"
+              : !file.type.startsWith("image/"))
+          )
+            throw Error("请选择8 MB以内的图片或 PDF，文件类型需与卡片一致。");
+          if (kind === "pdf") {
+            const header = new TextDecoder().decode(
+              await file.slice(0, 5).arrayBuffer(),
+            );
+            if (header !== "%PDF-") throw Error("这不是有效的 PDF 文件。");
+          }
+          path = `${userId}/${eventId}/${crypto.randomUUID()}.${mimes[file.type]}`;
+          const upload = await db.storage
+            .from("event-board")
+            .upload(path, file, { contentType: file.type, upsert: false });
+          if (upload.error)
+            throw Error("上传失败，请确认文件不超过8 MB及附件迁移已部署。");
+        }
+        const el = viewport.current;
+        const pos = nextCardPosition(
+          cards,
+          dragPosition(
+            { x: 0, y: 0 },
+            { x: el ? el.scrollLeft + 80 : 40, y: el ? el.scrollTop + 80 : 40 },
+            zoom,
+          ),
+        );
+        const { error } = await db
+          .from("event_board_cards")
+          .insert({
+            user_id: userId,
+            event_id: eventId,
+            kind,
+            title: newTitle.trim(),
+            body,
+            url: link,
+            color,
+            image_path: path,
+            original_filename: path ? file?.name.slice(0, 255) : null,
+            ...pos,
+          });
+        if (error) {
+          if (path) await db.storage.from("event-board").remove([path]);
+          throw Error("卡片未能保存，输入内容已保留。");
+        }
       }
-      const { error } = await db
-        .from("event_board_cards")
-        .insert({
-          event_id: eventId,
-          user_id: userId,
-          kind,
-          title: newTitle.trim(),
-          body,
-          url: kind === "link" ? url.trim() : null,
-          image_path: path,
-          x: 40 + (cards.length % 5) * 300,
-          y: 40 + (Math.floor(cards.length / 5) % 5) * 300,
-        });
-      if (error) {
-        if (path) await db.storage.from("event-board").remove([path]);
-        throw Error("卡片保存失败，文字尚未清空，请稍后重试。");
-      }
+      setComposer(false);
+      setEditing(null);
       setNewTitle("");
       setBody("");
       setURL("");
@@ -173,14 +277,19 @@ export default function EventBoard({ eventId }: { eventId: string }) {
       if (fileInput.current) fileInput.current.value = "";
     });
   }
-  async function save(card: Card, patch: Partial<Card>) {
+  async function moveCard(card: Card, pos: { x: number; y: number }) {
     await action(async () => {
-      const { error } = await browserDB()
+      const r = await browserDB()
         .from("event_board_cards")
-        .update(patch)
+        .update(pos)
         .eq("id", card.id)
-        .eq("event_id", eventId);
-      if (error) throw Error("修改未保存，请重试。");
+        .eq("event_id", eventId)
+        .select("id")
+        .single();
+      if (r.error) {
+        await reload();
+        throw Error("位置没有保存，已恢复数据库位置。");
+      }
     });
   }
   function finishDrag(
@@ -190,351 +299,451 @@ export default function EventBoard({ eventId }: { eventId: string }) {
     const d = drag.current;
     if (!d || d.pointer !== e.pointerId) return;
     drag.current = null;
-    const x = cancel
-      ? d.x
-      : Math.max(0, Math.min(1700, Math.round(d.x + e.clientX - d.startX)));
-    const y = cancel
-      ? d.y
-      : Math.max(0, Math.min(1700, Math.round(d.y + e.clientY - d.startY)));
-    const card = cards.find((c) => c.id === d.id);
-    if (card) void save(card, { x, y });
+    const c = cards.find((c) => c.id === d.id);
+    if (c)
+      void moveCard(
+        c,
+        cancel
+          ? { x: d.x, y: d.y }
+          : dragPosition(
+              d,
+              { x: e.clientX - d.startX, y: e.clientY - d.startY },
+              zoom,
+            ),
+      );
+  }
+  function fit() {
+    const el = viewport.current;
+    if (!el) return;
+    const maxX = Math.max(700, ...cards.map((c) => c.x + 300)),
+      maxY = Math.max(400, ...cards.map((c) => c.y + 600));
+    setZoom(zoomValue(Math.min(el.clientWidth / maxX, el.clientHeight / maxY)));
+    requestAnimationFrame(() => {
+      el.scrollLeft = 0;
+      el.scrollTop = 0;
+    });
   }
   return (
-    <main className="board-page">
-      <Link href="/">← 返回日历</Link>
-      <p className="eyebrow">事件资料 · 私人看板</p>
-      <h1>{title}</h1>
-      <p className="muted">
-        记录想法、图片和来源，拖动卡片整理思路，连接相关资料。图片使用私有存储；外部链接由你点击后打开。
-      </p>
-      <p role="status" aria-live="polite">
-        {message}
+    <main className="board-page board-workspace">
+      <header className="board-header">
+        <div>
+          <Link href="/">← 日历</Link>
+          <span className="board-separator"> / </span>
+          <Link href="/search">搜索与关联</Link>
+          <h1>{title}</h1>
+        </div>
+        <span className="muted">私人资料墙</span>
+      </header>
+      <p role="status" aria-live="polite" className="board-status">
+        {message || (busy ? "正在保存…" : "")}
       </p>
       {userId && (
         <>
-          <form
-            className="panel board-composer"
-            onSubmit={(e) => {
-              e.preventDefault();
-              void add();
-            }}
-          >
-            <label>
-              卡片类型
-              <select
-                value={kind}
-                onChange={(e) => setKind(e.target.value as Card["kind"])}
-                disabled={busy}
-              >
-                <option value="note">文字便签</option>
-                <option value="image">图片</option>
-                <option value="link">链接</option>
-              </select>
-            </label>
-            <label>
-              标题
-              <input
-                maxLength={200}
-                value={newTitle}
-                onChange={(e) => setNewTitle(e.target.value)}
-                disabled={busy}
-              />
-            </label>
-            <label>
-              文字 / 图片说明
-              <textarea
-                maxLength={10000}
-                value={body}
-                onChange={(e) => setBody(e.target.value)}
-                disabled={busy}
-              />
-            </label>
-            {kind === "link" && (
-              <label>
-                来源链接
-                <input
-                  type="url"
-                  required
-                  maxLength={2000}
-                  value={url}
-                  onChange={(e) => setURL(e.target.value)}
-                  disabled={busy}
-                />
-              </label>
-            )}
-            {kind === "image" && (
-              <label>
-                图片（≤8 MB）
-                <input
-                  ref={fileInput}
-                  type="file"
-                  accept="image/png,image/jpeg,image/webp,image/gif"
-                  required
-                  disabled={busy}
-                  onChange={(e) => setFile(e.target.files?.[0] || null)}
-                />
-              </label>
-            )}
-            <button className="primary" disabled={busy}>
-              {busy ? "正在保存…" : "添加到看板"}
-            </button>
-          </form>
-          {cards.length > 1 && (
-            <form
-              className="panel board-links"
-              onSubmit={(e) => {
-                e.preventDefault();
-                void action(async () => {
-                  if (!from || !to || from === to)
-                    throw Error("请选择两张不同卡片。");
-                  const { error } = await browserDB()
-                    .from("event_board_edges")
-                    .insert({
-                      event_id: eventId,
-                      user_id: userId,
-                      from_card: from,
-                      to_card: to,
-                    });
-                  if (error) throw Error("连线未保存；请检查是否已存在。");
-                  setFrom("");
-                  setTo("");
-                });
-              }}
+          <div className="board-toolbar" role="toolbar" aria-label="看板工具">
+            {(Object.keys(types) as Card["kind"][]).map((k) => (
+              <button key={k} disabled={busy} onClick={() => startNew(k)}>
+                ＋ {types[k]}
+              </button>
+            ))}
+            <button
+              aria-expanded={composer}
+              aria-controls="board-composer"
+              onClick={() => setComposer(!composer)}
             >
-              <label>
-                从
-                <select
-                  value={from}
-                  required
-                  disabled={busy}
-                  onChange={(e) => setFrom(e.target.value)}
+              {composer ? "收起输入区" : "展开输入区"}
+            </button>
+            <button aria-expanded={linker} onClick={() => setLinker(!linker)}>
+              连接资料
+            </button>
+            <span className="board-toolbar-spacer" />
+            <button
+              onClick={() => changeZoom(zoom - 0.1)}
+              disabled={zoom <= 0.3}
+              aria-label="缩小看板"
+            >
+              −
+            </button>
+            <button onClick={() => changeZoom(1)} aria-label="重置缩放">
+              {Math.round(zoom * 100)}%
+            </button>
+            <button
+              onClick={() => changeZoom(zoom + 0.1)}
+              disabled={zoom >= 2}
+              aria-label="放大看板"
+            >
+              ＋
+            </button>
+            <button onClick={fit}>适应内容</button>
+          </div>
+          <div className={`board-layout ${composer ? "with-composer" : ""}`}>
+            {composer && (
+              <aside className="board-drawer" id="board-composer">
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    void submit();
+                  }}
                 >
-                  <option value="">选择卡片</option>
-                  {cards.map((c, i) => (
-                    <option key={c.id} value={c.id}>
-                      {i + 1}. {c.title || c.body.slice(0, 20) || "图片"}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                到
-                <select
-                  value={to}
-                  required
-                  disabled={busy}
-                  onChange={(e) => setTo(e.target.value)}
-                >
-                  <option value="">选择卡片</option>
-                  {cards.map((c, i) => (
-                    <option key={c.id} value={c.id}>
-                      {i + 1}. {c.title || c.body.slice(0, 20) || "图片"}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <button disabled={busy}>连接资料</button>
-            </form>
-          )}
-          <div className="board-viewport" aria-label="可滚动事件看板">
-            <div className="board-canvas">
-              <svg
-                className="board-wires"
-                width="2000"
-                height="2000"
-                aria-hidden="true"
-              >
-                {edges.map((e) => {
-                  const a = cards.find((c) => c.id === e.from_card),
-                    b = cards.find((c) => c.id === e.to_card);
-                  return a && b ? (
-                    <line
-                      key={e.id}
-                      x1={a.x + 135}
-                      y1={a.y + 30}
-                      x2={b.x + 135}
-                      y2={b.y + 30}
-                    />
-                  ) : null;
-                })}
-              </svg>
-              {!cards.length && (
-                <p className="board-empty">
-                  从一张便签开始，把这件事的资料放在一起。
-                </p>
-              )}
-              {cards.map((card, index) => (
-                <article
-                  key={card.id}
-                  className={`board-card board-${card.kind}`}
-                  style={{ left: card.x, top: card.y }}
-                >
-                  <button
-                    className="board-drag"
-                    aria-label={`移动卡片${index + 1}；也可用方向键移动`}
-                    disabled={busy}
-                    onPointerDown={(e) => {
-                      if (e.button !== 0 || drag.current) return;
-                      e.currentTarget.setPointerCapture(e.pointerId);
-                      drag.current = {
-                        id: card.id,
-                        pointer: e.pointerId,
-                        startX: e.clientX,
-                        startY: e.clientY,
-                        x: card.x,
-                        y: card.y,
-                      };
-                    }}
-                    onPointerMove={(e) => {
-                      const d = drag.current;
-                      if (!d || d.id !== card.id || d.pointer !== e.pointerId)
-                        return;
-                      setCards((cs) =>
-                        cs.map((c) =>
-                          c.id === d.id
-                            ? {
-                                ...c,
-                                x: Math.max(
-                                  0,
-                                  Math.min(
-                                    1700,
-                                    Math.round(d.x + e.clientX - d.startX),
-                                  ),
-                                ),
-                                y: Math.max(
-                                  0,
-                                  Math.min(
-                                    1700,
-                                    Math.round(d.y + e.clientY - d.startY),
-                                  ),
-                                ),
-                              }
-                            : c,
-                        ),
-                      );
-                    }}
-                    onPointerUp={(e) => finishDrag(e)}
-                    onPointerCancel={(e) => finishDrag(e, true)}
-                    onKeyDown={(e) => {
-                      if (
-                        ![
-                          "ArrowLeft",
-                          "ArrowRight",
-                          "ArrowUp",
-                          "ArrowDown",
-                        ].includes(e.key)
-                      )
-                        return;
-                      e.preventDefault();
-                      void save(card, {
-                        x: Math.max(
-                          0,
-                          Math.min(
-                            1700,
-                            card.x +
-                              (e.key === "ArrowRight"
-                                ? 20
-                                : e.key === "ArrowLeft"
-                                  ? -20
-                                  : 0),
-                          ),
-                        ),
-                        y: Math.max(
-                          0,
-                          Math.min(
-                            1700,
-                            card.y +
-                              (e.key === "ArrowDown"
-                                ? 20
-                                : e.key === "ArrowUp"
-                                  ? -20
-                                  : 0),
-                          ),
-                        ),
-                      });
-                    }}
-                  >
-                    ⠿ {index + 1} ·{" "}
-                    {card.kind === "image"
-                      ? "图片"
-                      : card.kind === "link"
-                        ? "链接"
-                        : "便签"}
-                  </button>
-                  <input
-                    aria-label="卡片标题"
-                    maxLength={200}
-                    defaultValue={card.title}
-                    key={`title-${card.title}`}
-                    disabled={busy}
-                    onBlur={(e) => {
-                      if (e.target.value !== card.title)
-                        void save(card, { title: e.target.value });
-                    }}
-                  />
-                  {card.kind === "image" &&
-                    (card.signedURL ? (
-                      <img
-                        src={card.signedURL}
-                        alt={card.title || "事件资料图片"}
-                        onError={() =>
-                          setMessage("图片链接可能已过期，请刷新页面。")
-                        }
-                      />
-                    ) : (
-                      <p>图片暂时无法读取，请刷新。</p>
-                    ))}
-                  <textarea
-                    aria-label="卡片文字"
-                    maxLength={10000}
-                    defaultValue={card.body}
-                    key={`body-${card.body}`}
-                    disabled={busy}
-                    onBlur={(e) => {
-                      if (e.target.value !== card.body)
-                        void save(card, { body: e.target.value });
-                    }}
-                  />
-                  {card.url && /^https?:\/\//i.test(card.url) && (
-                    <a
-                      href={card.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
+                  <div className="board-drawer-heading">
+                    <h2>
+                      {editing ? "编辑" : "添加"}
+                      {types[kind]}
+                    </h2>
+                    <button
+                      type="button"
+                      onClick={() => setComposer(false)}
+                      aria-label="收起输入区"
                     >
-                      打开来源 ↗
-                    </a>
+                      ×
+                    </button>
+                  </div>
+                  <label>
+                    标题
+                    <input
+                      maxLength={200}
+                      value={newTitle}
+                      onChange={(e) => setNewTitle(e.target.value)}
+                      disabled={busy}
+                    />
+                  </label>
+                  <label>
+                    {kind === "image"
+                      ? "图片下方的文字记录"
+                      : kind === "pdf"
+                        ? "摘要 / 阅读笔记"
+                        : "记录"}
+                    <textarea
+                      maxLength={10000}
+                      rows={6}
+                      value={body}
+                      onChange={(e) => setBody(e.target.value)}
+                      disabled={busy}
+                      placeholder="写下想法，也可用 [[事件或卡片标题]] 建立关联"
+                    />
+                  </label>
+                  {kind === "note" && (
+                    <label>
+                      便签颜色
+                      <select
+                        value={color}
+                        disabled={busy}
+                        onChange={(e) =>
+                          setColor(e.target.value as Card["color"])
+                        }
+                      >
+                        <option value="yellow">浅黄</option>
+                        <option value="pink">粉色</option>
+                        <option value="blue">浅蓝</option>
+                        <option value="green">浅绿</option>
+                      </select>
+                    </label>
                   )}
-                  <button
-                    disabled={busy}
-                    onClick={() => {
-                      if (window.confirm("删除这张卡片及其连线？"))
-                        void action(async () => {
-                          const db = browserDB();
-                          const { error } = await db
-                            .from("event_board_cards")
-                            .delete()
-                            .eq("id", card.id)
-                            .eq("event_id", eventId);
-                          if (error) throw Error("删除失败。");
-                          if (card.image_path) {
-                            const removed = await db.storage
-                              .from("event-board")
-                              .remove([card.image_path]);
-                            if (removed.error)
-                              setMessage("卡片已删除，但图片文件清理失败。");
-                          }
-                        });
-                    }}
-                  >
-                    删除卡片
+                  {kind === "link" && (
+                    <label>
+                      来源网址
+                      <input
+                        type="url"
+                        maxLength={2000}
+                        required
+                        value={url}
+                        onChange={(e) => setURL(e.target.value)}
+                        disabled={busy}
+                      />
+                    </label>
+                  )}
+                  {!editing && (kind === "image" || kind === "pdf") && (
+                    <label>
+                      {kind === "pdf" ? "PDF" : "图片"}（≤8 MB）
+                      <input
+                        key={kind}
+                        ref={fileInput}
+                        type="file"
+                        accept={
+                          kind === "pdf"
+                            ? "application/pdf,.pdf"
+                            : "image/png,image/jpeg,image/webp,image/gif"
+                        }
+                        required
+                        disabled={busy}
+                        onChange={(e) => setFile(e.target.files?.[0] || null)}
+                      />
+                    </label>
+                  )}
+                  {kind === "pdf" && (
+                    <p className="muted">
+                      PDF
+                      原文件私有保存。可搜索标题、文件名和阅读笔记；暂不自动识别
+                      PDF 正文或扫描图片。
+                    </p>
+                  )}
+                  <button className="primary" disabled={busy}>
+                    {busy ? "保存中…" : editing ? "保存修改" : "放到看板上"}
                   </button>
-                </article>
-              ))}
+                </form>
+              </aside>
+            )}
+            <div
+              className="board-viewport"
+              ref={viewport}
+              aria-label="事件看板，可滚动；按住 Ctrl 或 Command 滚轮缩放"
+            >
+              <div
+                className="board-stage"
+                style={{ width: 2500 * zoom, height: 2500 * zoom }}
+              >
+                <div
+                  className="board-canvas"
+                  style={{
+                    transform: `scale(${zoom})`,
+                    transformOrigin: "top left",
+                  }}
+                >
+                  <svg
+                    className="board-wires"
+                    width="2500"
+                    height="2500"
+                    aria-hidden="true"
+                  >
+                    {edges.map((e) => {
+                      const a = cards.find((c) => c.id === e.from_card),
+                        b = cards.find((c) => c.id === e.to_card);
+                      return a && b ? (
+                        <path
+                          key={e.id}
+                          d={`M ${a.x + 135} ${a.y + 35} Q ${(a.x + b.x) / 2 + 160} ${(a.y + b.y) / 2 - 60} ${b.x + 135} ${b.y + 35}`}
+                        />
+                      ) : null;
+                    })}
+                  </svg>
+                  {!cards.length && (
+                    <div className="board-empty">
+                      <h2>让想法在这里展开</h2>
+                      <p>
+                        从上方添加便签、图片、链接或 PDF。输入区可随时收起。
+                      </p>
+                    </div>
+                  )}
+                  {cards.map((c, i) => (
+                    <article
+                      id={`card-${c.id}`}
+                      key={c.id}
+                      className={`board-card board-${c.kind} paper-${c.color || "yellow"}`}
+                      style={{ left: c.x, top: c.y }}
+                    >
+                      <div className="board-card-tools">
+                        <button
+                          className="board-drag"
+                          aria-label={`拖动卡片${i + 1}，或用方向键移动`}
+                          disabled={busy}
+                          onPointerDown={(e) => {
+                            if (e.button !== 0 || drag.current) return;
+                            e.currentTarget.setPointerCapture(e.pointerId);
+                            drag.current = {
+                              id: c.id,
+                              pointer: e.pointerId,
+                              startX: e.clientX,
+                              startY: e.clientY,
+                              x: c.x,
+                              y: c.y,
+                            };
+                          }}
+                          onPointerMove={(e) => {
+                            const d = drag.current;
+                            if (
+                              !d ||
+                              d.id !== c.id ||
+                              d.pointer !== e.pointerId
+                            )
+                              return;
+                            const pos = dragPosition(
+                              d,
+                              {
+                                x: e.clientX - d.startX,
+                                y: e.clientY - d.startY,
+                              },
+                              zoom,
+                            );
+                            setCards((cs) =>
+                              cs.map((card) =>
+                                card.id === d.id ? { ...card, ...pos } : card,
+                              ),
+                            );
+                          }}
+                          onPointerUp={(e) => finishDrag(e)}
+                          onPointerCancel={(e) => finishDrag(e, true)}
+                          onKeyDown={(e) => {
+                            const deltas: Record<
+                              string,
+                              { x: number; y: number }
+                            > = {
+                              ArrowLeft: { x: -20, y: 0 },
+                              ArrowRight: { x: 20, y: 0 },
+                              ArrowUp: { x: 0, y: -20 },
+                              ArrowDown: { x: 0, y: 20 },
+                            };
+                            if (!deltas[e.key]) return;
+                            e.preventDefault();
+                            void moveCard(c, dragPosition(c, deltas[e.key], 1));
+                          }}
+                        >
+                          ⠿
+                        </button>
+                        <button onClick={() => editCard(c)} disabled={busy}>
+                          编辑
+                        </button>
+                        <button
+                          aria-label={`删除${c.title || types[c.kind]}`}
+                          disabled={busy}
+                          onClick={() => {
+                            if (window.confirm("删除这张卡片及其连线？"))
+                              void action(async () => {
+                                const db = browserDB();
+                                const r = await db
+                                  .from("event_board_cards")
+                                  .delete()
+                                  .eq("id", c.id)
+                                  .eq("event_id", eventId);
+                                if (r.error) throw Error("删除失败。");
+                                if (c.image_path) {
+                                  const removed = await db.storage
+                                    .from("event-board")
+                                    .remove([c.image_path]);
+                                  if (removed.error)
+                                    setMessage(
+                                      "卡片已删除，附件文件清理失败。",
+                                    );
+                                }
+                              });
+                          }}
+                        >
+                          ×
+                        </button>
+                      </div>
+                      {c.kind === "image" &&
+                        (c.signedURL ? (
+                          <a
+                            className="board-photo"
+                            href={c.signedURL}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                          >
+                            <img
+                              src={c.signedURL}
+                              alt={c.title || "事件资料图片"}
+                              onError={() =>
+                                setMessage("图片链接可能已过期，请刷新页面。")
+                              }
+                            />
+                          </a>
+                        ) : (
+                          <p>图片暂时无法读取，请刷新。</p>
+                        ))}
+                      <div className="board-card-content">
+                        {c.kind === "pdf" && (
+                          <p className="board-pdf-label">
+                            ▤ PDF · {c.original_filename}
+                          </p>
+                        )}
+                        {c.title && <h3>{c.title}</h3>}
+                        {c.body && <p className="board-card-body">{c.body}</p>}
+                        {c.url && /^https?:\/\//i.test(c.url) && (
+                          <a
+                            href={c.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                          >
+                            打开来源 ↗
+                          </a>
+                        )}
+                        {c.kind === "pdf" && c.signedURL && (
+                          <a
+                            href={c.signedURL}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                          >
+                            打开 PDF ↗
+                          </a>
+                        )}
+                        {c.kind === "image" && !c.body && (
+                          <button
+                            className="board-caption-add"
+                            onClick={() => editCard(c)}
+                          >
+                            ＋ 添加文字记录
+                          </button>
+                        )}
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              </div>
             </div>
           </div>
-          {edges.length > 0 && (
-            <details className="panel">
-              <summary>管理连线（{edges.length}）</summary>
+          {linker && (
+            <section className="panel board-connection-panel">
+              <form
+                className="board-links"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  void action(async () => {
+                    if (!from || !to || from === to)
+                      throw Error("请选择两张不同卡片。");
+                    const r = await browserDB()
+                      .from("event_board_edges")
+                      .insert({
+                        event_id: eventId,
+                        user_id: userId,
+                        from_card: from,
+                        to_card: to,
+                      });
+                    if (r.error) throw Error("连线未保存，请检查是否已存在。");
+                    setFrom("");
+                    setTo("");
+                  });
+                }}
+              >
+                <label>
+                  从
+                  <select
+                    required
+                    disabled={busy}
+                    value={from}
+                    onChange={(e) => setFrom(e.target.value)}
+                  >
+                    <option value="">选择卡片</option>
+                    {cards.map((c, i) => (
+                      <option key={c.id} value={c.id}>
+                        {i + 1}.{" "}
+                        {c.title ||
+                          c.body.slice(0, 20) ||
+                          c.original_filename ||
+                          types[c.kind]}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  到
+                  <select
+                    required
+                    disabled={busy}
+                    value={to}
+                    onChange={(e) => setTo(e.target.value)}
+                  >
+                    <option value="">选择卡片</option>
+                    {cards.map((c, i) => (
+                      <option key={c.id} value={c.id}>
+                        {i + 1}.{" "}
+                        {c.title ||
+                          c.body.slice(0, 20) ||
+                          c.original_filename ||
+                          types[c.kind]}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <button disabled={busy}>保存连线</button>
+              </form>
               {edges.map((e) => (
                 <p key={e.id}>
                   {cards.find((c) => c.id === e.from_card)?.title || "便签"} →{" "}
@@ -543,19 +752,20 @@ export default function EventBoard({ eventId }: { eventId: string }) {
                     disabled={busy}
                     onClick={() =>
                       void action(async () => {
-                        const { error } = await browserDB()
+                        const r = await browserDB()
                           .from("event_board_edges")
                           .delete()
                           .eq("id", e.id);
-                        if (error) throw Error("删除连线失败。");
+                        if (r.error) throw Error("删除连线失败。");
                       })
                     }
                   >
-                    移除连线
+                    移除
                   </button>
                 </p>
               ))}
-            </details>
+              <Link href="/search">跨事件关联 → 搜索与关联</Link>
+            </section>
           )}
         </>
       )}

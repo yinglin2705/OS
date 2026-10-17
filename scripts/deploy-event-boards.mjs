@@ -30,8 +30,17 @@ try {
     "utf8",
   );
   await query(sql);
+  await query(
+    await readFile(
+      new URL(
+        "../supabase/migrations/003_knowledge_workspace.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    ),
+  );
   const rows = await query(
-    "select (select count(*) from pg_tables where schemaname='public' and tablename in ('event_board_cards','event_board_edges') and rowsecurity) as private_tables,(select count(*) from pg_policies where schemaname='public' and tablename in ('event_board_cards','event_board_edges') and policyname='board_owner') as owner_policies,(select count(*) from storage.buckets where id='event-board' and public=false and file_size_limit=8388608 and allowed_mime_types=array['image/jpeg','image/png','image/webp','image/gif']) as private_bucket;",
+    "select (select count(*) from pg_tables where schemaname='public' and tablename in ('event_board_cards','event_board_edges') and rowsecurity) as private_tables,(select count(*) from pg_policies where schemaname='public' and tablename in ('event_board_cards','event_board_edges') and policyname='board_owner') as owner_policies,(select count(*) from storage.buckets where id='event-board' and public=false and file_size_limit=8388608 and allowed_mime_types=array['image/jpeg','image/png','image/webp','image/gif','application/pdf']) as private_bucket;",
   );
   if (
     !Array.isArray(rows) ||
@@ -40,8 +49,13 @@ try {
     Number(rows[0]?.private_bucket) !== 1
   )
     throw Error("Private board schema verification did not pass.");
+  const search = await query(
+    "select to_regprocedure('public.search_knowledge(text)') is not null as search_ready, (select rowsecurity from pg_tables where schemaname='public' and tablename='knowledge_links') as private_links;",
+  );
+  if (!search?.[0]?.search_ready || !search?.[0]?.private_links)
+    throw Error("Knowledge search privacy verification failed.");
   console.log(
-    "::notice title=Private event board schema::Two RLS tables, owner policies and private image bucket verified; no event records changed.",
+    "::notice title=Private event board schema::Private board tables, search RPC, knowledge links and private image/PDF bucket verified; no event records changed.",
   );
 } catch (e) {
   console.error(e instanceof Error ? e.message : "Schema deployment failed.");

@@ -134,3 +134,8 @@ SQL Editor 管理员执行时没有用户会话，需使用你本人 user_id 过
 接口及模板见 [docs/INGESTION.md](docs/INGESTION.md)。你的 DFPI Excel 尚未上传，上传后须逐条核实：Monday C4D Group A / Tuesday Coding Group A 应结束于 13:00；research dossier deadline 要进入截止字段；photography first choice 保持 applied。未知年份、缺失时间、复杂宽格式课表和重复规则不会被擅自补全。
 
 未实现项：完整结构化 LLM 解析、Google OAuth 同步、邮件 / push、重复实例展开、附件上传与实时交通路线。托管部署、真实邮件登录、Telegram webhook/Cron 与真实端到端发送需要你提供服务配置后验证；本地测试不等于上线。
+
+
+## 事件看板、搜索与 Obsidian
+
+事件详情可进入私人看板，支持便签、图片、PDF和链接；输入侧栏可收起，画布可缩放。左侧「搜索与关联」可搜索日程和看板文字、建立跨事件关系，并导出含附件的 Markdown vault。Google OAuth 自动同步、PDF正文提取/OCR、Obsidian双向同步尚未实现。部署、权限和验证边界见 [私人资料工作区](docs/KNOWLEDGE_WORKSPACE.md)。

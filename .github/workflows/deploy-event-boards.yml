@@ -4,6 +4,7 @@ on:
     branches: [main]
     paths:
       - supabase/migrations/002_event_boards.sql
+      - supabase/migrations/003_knowledge_workspace.sql
       - scripts/deploy-event-boards.mjs
       - .github/workflows/deploy-event-boards.yml
   workflow_dispatch:

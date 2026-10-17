@@ -5,7 +5,7 @@ ying_db="ying-test-${RANDOM}-$$"
 trap 'docker rm -f "$ying_db" >/dev/null 2>&1 || true' EXIT
 docker run --name "$ying_db" -e POSTGRES_PASSWORD=local-test-only -d postgres:17 >/dev/null
 for attempt in {1..30}; do
-  if docker exec "$ying_db" pg_isready -U postgres >/dev/null 2>&1; then break; fi
+  if docker exec "$ying_db" sh -c 'test "$(head -n1 /var/lib/postgresql/data/postmaster.pid)" = 1 && pg_isready -U postgres' >/dev/null 2>&1; then break; fi
   sleep 1
 done
 docker exec -i "$ying_db" psql -U postgres -v ON_ERROR_STOP=1 < tests/db-bootstrap.sql
@@ -16,6 +16,10 @@ for attempt in 1 2; do
   docker exec -i "$ying_db" psql -U postgres -v ON_ERROR_STOP=1 < supabase/migrations/002_event_boards.sql
 done
 docker exec -i "$ying_db" psql -U postgres -v ON_ERROR_STOP=1 < tests/event-boards.sql
+for attempt in 1 2; do
+  docker exec -i "$ying_db" psql -U postgres -v ON_ERROR_STOP=1 < supabase/migrations/003_knowledge_workspace.sql
+done
+docker exec -i "$ying_db" psql -U postgres -v ON_ERROR_STOP=1 < tests/knowledge-workspace.sql
 docker exec -i "$ying_db" psql -U postgres -v ON_ERROR_STOP=1 < tests/cron-before.sql
 for attempt in 1 2; do
   docker exec -i "$ying_db" psql -U postgres -v ON_ERROR_STOP=1 < supabase/cron.sql

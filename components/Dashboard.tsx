@@ -221,9 +221,12 @@ export default function Dashboard({
     const snapshot = [...proposals];
     const additions = snapshot.filter((p) => !p.event_id).length;
     const warnings = snapshot.filter((p) => p.warnings.length).length;
-    if (!window.confirm(
-      `确认全部 ${snapshot.length} 条更改？\n新增 ${additions} 条，修改 ${snapshot.length - additions} 条，其中 ${warnings} 条有待核实提示。\n\n仅将提议写入日历，不代表已核实来源或已预约；未知时间、拟报名和备选状态保持不变。`,
-    )) return;
+    if (
+      !window.confirm(
+        `确认全部 ${snapshot.length} 条更改？\n新增 ${additions} 条，修改 ${snapshot.length - additions} 条，其中 ${warnings} 条有待核实提示。\n\n仅将提议写入日历，不代表已核实来源或已预约；未知时间、拟报名和备选状态保持不变。`,
+      )
+    )
+      return;
     approvalInFlight.current = true;
     setBusy(true);
     let completed = 0;
@@ -242,11 +245,15 @@ export default function Dashboard({
         }
         completed++;
       }
-      setMessage(stopped
-        ? `已确认 ${completed} 条后停止：有记录无法确认，请刷新检查剩余提议；已成功的更改保留。`
-        : `已确认全部 ${completed} 条更改，保留原状态、来源与修改历史`);
+      setMessage(
+        stopped
+          ? `已确认 ${completed} 条后停止：有记录无法确认，请刷新检查剩余提议；已成功的更改保留。`
+          : `已确认全部 ${completed} 条更改，保留原状态、来源与修改历史`,
+      );
     } catch {
-      setMessage(`网络中断，已收到 ${completed} 条成功结果；最后一条结果尚未确认，请刷新核对后继续。`);
+      setMessage(
+        `网络中断，已收到 ${completed} 条成功结果；最后一条结果尚未确认，请刷新核对后继续。`,
+      );
     } finally {
       try {
         await refresh();
@@ -402,6 +409,9 @@ export default function Dashboard({
               )}
             </button>
           ))}
+          <a className="nav-search" href="/search">
+            ⌕ 搜索与关联
+          </a>
         </nav>
         <div className="sidebar-foot">
           <p>DFPI · Bartlett</p>
@@ -790,13 +800,21 @@ export default function Dashboard({
             <h2>等待你确认 · {proposals.length}</h2>
             {proposals.length > 0 && (
               <section className="panel">
-                <button className="primary" disabled={busy} onClick={() => void approveAll()}>
+                <button
+                  className="primary"
+                  disabled={busy}
+                  onClick={() => void approveAll()}
+                >
                   全部确认（{proposals.length} 条）
                 </button>
                 <p className="muted">
-                  写入日历并保留原状态和来源；有待核实提示 {proposals.filter((p) => p.warnings.length).length} 条。确认更改不代表确认出席。
+                  写入日历并保留原状态和来源；有待核实提示{" "}
+                  {proposals.filter((p) => p.warnings.length).length}{" "}
+                  条。确认更改不代表确认出席。
                 </p>
-                <p role="status" aria-live="polite">{approvalProgress}</p>
+                <p role="status" aria-live="polite">
+                  {approvalProgress}
+                </p>
               </section>
             )}
             {proposals.map((p) => (
@@ -944,7 +962,10 @@ export default function Dashboard({
               {categories[selected.category]} · {statusLabels[selected.status]}
             </p>
             <h2>{selected.title}</h2>
-            <a className="primary board-open" href={`/events/${selected.id}/board`}>
+            <a
+              className="primary board-open"
+              href={`/events/${selected.id}/board`}
+            >
               打开事件看板 ↗
             </a>
             <dl>

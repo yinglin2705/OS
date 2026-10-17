@@ -65,6 +65,8 @@ export default function Dashboard({
   initialTab?: string;
 }) {
   const timetable = useRef<HTMLDivElement>(null);
+  const approvalInFlight = useRef(false);
+  const [approvalProgress, setApprovalProgress] = useState("");
   const [ready, setReady] = useState(false),
     [user, setUser] = useState<string | null>(null),
     [loading, setLoading] = useState(true),
@@ -188,20 +190,72 @@ export default function Dashboard({
     }
   }
   async function approve(id: string, accept: boolean) {
+    if (approvalInFlight.current) return;
+    approvalInFlight.current = true;
     setBusy(true);
-    const { error } = await browserDB().rpc("confirm_proposal", {
-      proposal_id: id,
-      accept,
-    });
-    setMessage(
-      error
-        ? "确认失败：" + error.message
-        : accept
-          ? "已更新日历，保留原来源与修改历史"
-          : "已忽略提议",
-    );
-    await refresh();
-    setBusy(false);
+    try {
+      const { error } = await browserDB().rpc("confirm_proposal", {
+        proposal_id: id,
+        accept,
+      });
+      setMessage(
+        error
+          ? "确认失败：" + error.message
+          : accept
+            ? "已更新日历，保留原来源与修改历史"
+            : "已忽略提议",
+      );
+    } catch {
+      setMessage("网络中断，请刷新核对结果后再操作");
+    } finally {
+      try {
+        await refresh();
+      } finally {
+        approvalInFlight.current = false;
+        setBusy(false);
+      }
+    }
+  }
+  async function approveAll() {
+    if (busy || approvalInFlight.current || !proposals.length) return;
+    const snapshot = [...proposals];
+    const additions = snapshot.filter((p) => !p.event_id).length;
+    const warnings = snapshot.filter((p) => p.warnings.length).length;
+    if (!window.confirm(
+      `确认全部 ${snapshot.length} 条更改？\n新增 ${additions} 条，修改 ${snapshot.length - additions} 条，其中 ${warnings} 条有待核实提示。\n\n仅将提议写入日历，不代表已核实来源或已预约；未知时间、拟报名和备选状态保持不变。`,
+    )) return;
+    approvalInFlight.current = true;
+    setBusy(true);
+    let completed = 0;
+    let stopped = false;
+    try {
+      const db = browserDB();
+      for (const proposal of snapshot) {
+        setApprovalProgress(`正在确认 ${completed + 1} / ${snapshot.length}…`);
+        const { error } = await db.rpc("confirm_proposal", {
+          proposal_id: proposal.id,
+          accept: true,
+        });
+        if (error) {
+          stopped = true;
+          break;
+        }
+        completed++;
+      }
+      setMessage(stopped
+        ? `已确认 ${completed} 条后停止：有记录无法确认，请刷新检查剩余提议；已成功的更改保留。`
+        : `已确认全部 ${completed} 条更改，保留原状态、来源与修改历史`);
+    } catch {
+      setMessage(`网络中断，已收到 ${completed} 条成功结果；最后一条结果尚未确认，请刷新核对后继续。`);
+    } finally {
+      try {
+        await refresh();
+      } finally {
+        setApprovalProgress("");
+        approvalInFlight.current = false;
+        setBusy(false);
+      }
+    }
   }
   async function login(e: React.FormEvent) {
     e.preventDefault();
@@ -693,7 +747,7 @@ export default function Dashboard({
               <h2>把新信息交给日历</h2>
               <p className="muted">
                 支持粘贴对话、CSV、Excel、ICS（含 Google Calendar 导出）及
-                ChatGPT JSON 导出。所有更改须逐条确认。
+                ChatGPT JSON 导出。可逐条审核，也可全部确认；原始状态保持不变。
               </p>
               <form
                 onSubmit={(e) => {
@@ -734,6 +788,17 @@ export default function Dashboard({
               </p>
             </section>
             <h2>等待你确认 · {proposals.length}</h2>
+            {proposals.length > 0 && (
+              <section className="panel">
+                <button className="primary" disabled={busy} onClick={() => void approveAll()}>
+                  全部确认（{proposals.length} 条）
+                </button>
+                <p className="muted">
+                  写入日历并保留原状态和来源；有待核实提示 {proposals.filter((p) => p.warnings.length).length} 条。确认更改不代表确认出席。
+                </p>
+                <p role="status" aria-live="polite">{approvalProgress}</p>
+              </section>
+            )}
             {proposals.map((p) => (
               <section className="panel proposal" key={p.id}>
                 <h3>

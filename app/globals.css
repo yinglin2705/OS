@@ -1483,3 +1483,140 @@ td:last-child {
   stroke-width: 1;
   pointer-events: none;
 }
+.notes-page {
+  max-width: 1500px;
+  margin: auto;
+  padding: 28px 24px;
+}
+.notes-layout {
+  display: grid;
+  grid-template-columns: 280px minmax(0, 1fr);
+  gap: 22px;
+}
+.notes-library {
+  position: sticky;
+  top: 20px;
+  align-self: start;
+  max-height: 85dvh;
+  overflow: auto;
+}
+.notes-library label,
+.notes-importer label {
+  display: grid;
+  gap: 7px;
+  margin-bottom: 14px;
+}
+.notes-list-item {
+  width: 100%;
+  text-align: left;
+  display: grid;
+  gap: 6px;
+  margin: 7px 0;
+  background: transparent;
+}
+.notes-list-item.selected {
+  background: var(--soft);
+  border-color: var(--accent);
+}
+.notes-list-item small {
+  color: var(--muted);
+}
+.notes-editor {
+  min-width: 0;
+}
+.notes-editor-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.notes-metadata {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin-bottom: 16px;
+}
+.notes-metadata label {
+  display: grid;
+  gap: 7px;
+}
+.notes-metadata input {
+  min-width: 0;
+  width: 100%;
+}
+.notes-body-editor {
+  width: 100%;
+  min-height: 52dvh;
+  resize: vertical;
+  font-family: inherit;
+  line-height: 1.8;
+}
+.notes-markdown p {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  min-height: 1em;
+}
+.notes-markdown h3 {
+  margin-top: 28px;
+}
+.notes-source {
+  max-height: 360px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.notes-importer {
+  margin-bottom: 24px;
+}
+.notes-importer textarea {
+  width: 100%;
+  margin-bottom: 12px;
+}
+.notes-proposal {
+  border-top: 1px solid var(--line);
+  padding: 20px 0;
+}
+.trash-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 18px 0;
+  border-bottom: 1px solid var(--line);
+}
+.trash-row > div {
+  flex: 1;
+  min-width: 180px;
+}
+.trash-row small {
+  display: block;
+  color: var(--muted);
+}
+.danger-text {
+  color: #a0483f;
+}
+@media (max-width: 760px) {
+  .notes-layout {
+    grid-template-columns: 1fr;
+  }
+  .notes-library {
+    position: static;
+    max-height: 35dvh;
+  }
+  .notes-metadata {
+    grid-template-columns: 1fr;
+  }
+  .notes-page {
+    padding: 18px 12px;
+  }
+}
+.nav-tools summary {
+  cursor: pointer;
+  color: var(--muted);
+  padding: 12px 15px;
+}
+.nav-tools[open] {
+  background: var(--soft);
+  border-radius: 10px;
+}

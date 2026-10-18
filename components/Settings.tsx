@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { DateTime } from "luxon";
 import { browserDB } from "@/lib/supabase";
+import { deleteOwned } from "@/lib/deletion-client";
 type Profile = {
   timezone: string;
   quiet_start: string | null;
@@ -62,7 +63,8 @@ export default function Settings({
       db.from("telegram_connections").select("connected_at").maybeSingle(),
       db
         .from("reminder_jobs")
-        .select("*,events(title)")
+        .select("*,events!inner(title,deleted_at)")
+        .is("events.deleted_at", null)
         .order("due_at")
         .limit(100),
       db
@@ -230,8 +232,41 @@ export default function Settings({
                 }
                 required
               />
+              <button
+                type="button"
+                disabled={busy}
+                onClick={async () => {
+                  if (
+                    !window.confirm(
+                      "删除这个简报计划及未发送队列？以后可恢复默认计划。",
+                    )
+                  )
+                    return;
+                  try {
+                    await deleteOwned("briefing", s.id);
+                    await load();
+                  } catch (e) {
+                    onMessage(e instanceof Error ? e.message : "删除失败");
+                  }
+                }}
+              >
+                删除计划
+              </button>
             </div>
           ))}
+          {schedules.length < 3 && (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={async () => {
+                const r = await browserDB().rpc("restore_default_briefings");
+                if (r.error) onMessage("恢复失败");
+                else await load();
+              }}
+            >
+              恢复缺失的默认简报计划（默认停用）
+            </button>
+          )}
           <div className="form-grid">
             <label>
               静音开始
@@ -332,6 +367,24 @@ export default function Settings({
               }}
             />
             <div className="actions">
+              <button
+                onClick={async () => {
+                  if (
+                    !window.confirm(
+                      "删除这项提醒及其通知记录？发送中的提醒须稍后处理。",
+                    )
+                  )
+                    return;
+                  try {
+                    await deleteOwned("reminder", r.id);
+                    await load();
+                  } catch (e) {
+                    onMessage(e instanceof Error ? e.message : "删除失败");
+                  }
+                }}
+              >
+                删除提醒
+              </button>
               {r.state !== "sent" && (
                 <>
                   <button onClick={() => reminder(r, { state: "approved" })}>
@@ -363,6 +416,24 @@ export default function Settings({
       <section className="panel wide">
         <div className="toolbar">
           <h2>通知历史 · 最近 50 条</h2>
+          <button
+            disabled={busy}
+            onClick={async () => {
+              if (
+                !window.confirm(
+                  "清空已完成的通知历史？不会撤回Telegram消息；保留最小去重指纹以防重发。",
+                )
+              )
+                return;
+              const r = await browserDB().rpc("clear_owned_records", {
+                record_type: "deliveries",
+              });
+              if (r.error) onMessage("清空失败");
+              else await load();
+            }}
+          >
+            清空已完成历史
+          </button>
           <button onClick={load}>刷新</button>
         </div>
         <div className="table-scroll">
@@ -374,6 +445,7 @@ export default function Settings({
                 <th>状态</th>
                 <th>尝试</th>
                 <th>送达 / 错误</th>
+                <th>操作</th>
               </tr>
             </thead>
             <tbody>
@@ -405,6 +477,29 @@ export default function Settings({
                           .setZone(profile.timezone)
                           .toFormat("dd/MM HH:mm")
                       : d.error || "—"}
+                  </td>
+                  <td>
+                    <button
+                      disabled={d.state === "sending" || busy}
+                      onClick={async () => {
+                        if (
+                          !window.confirm(
+                            "删除这条通知记录或取消待发任务？不会撤回已发消息。",
+                          )
+                        )
+                          return;
+                        try {
+                          await deleteOwned("delivery", d.id);
+                          await load();
+                        } catch (e) {
+                          onMessage(
+                            e instanceof Error ? e.message : "删除失败",
+                          );
+                        }
+                      }}
+                    >
+                      删除
+                    </button>
                   </td>
                 </tr>
               ))}

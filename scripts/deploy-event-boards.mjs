@@ -30,15 +30,22 @@ try {
     "utf8",
   );
   await query(sql);
-  await query(
-    await readFile(
-      new URL(
-        "../supabase/migrations/003_knowledge_workspace.sql",
-        import.meta.url,
-      ),
-      "utf8",
-    ),
+  // 006 widens search_knowledge's return type; replaying 003 afterward would
+  // regress its signature. Its prerequisite tables already exist when notes do.
+  const existingNotes = await query(
+    "select to_regclass('public.notes') is not null as ready;",
   );
+  if (!existingNotes?.[0]?.ready) {
+    await query(
+      await readFile(
+        new URL(
+          "../supabase/migrations/003_knowledge_workspace.sql",
+          import.meta.url,
+        ),
+        "utf8",
+      ),
+    );
+  }
   await query(
     await readFile(
       new URL(
@@ -48,6 +55,13 @@ try {
       "utf8",
     ),
   );
+  for (const migration of ["005_deletion_controls", "006_course_notes"])
+    await query(
+      await readFile(
+        new URL(`../supabase/migrations/${migration}.sql`, import.meta.url),
+        "utf8",
+      ),
+    );
   const rows = await query(
     "select (select count(*) from pg_tables where schemaname='public' and tablename in ('event_board_cards','event_board_edges') and rowsecurity) as private_tables,(select count(*) from pg_policies where schemaname='public' and tablename in ('event_board_cards','event_board_edges') and policyname='board_owner') as owner_policies,(select count(*) from storage.buckets where id='event-board' and public=false and file_size_limit=8388608 and allowed_mime_types=array['image/jpeg','image/png','image/webp','image/gif','application/pdf']) as private_bucket;",
   );
@@ -72,8 +86,17 @@ try {
     !interactive?.[0]?.private_highlights
   )
     throw Error("Board interaction migration verification failed.");
+  const notesReady = await query(
+    "select to_regprocedure('public.trash_event(uuid,boolean)') is not null as trash_ready,to_regprocedure('public.confirm_note_batch(uuid)') is not null as import_ready,(select count(*) from pg_tables where schemaname='public' and tablename in ('notes','note_sources','note_import_proposals','file_deletion_jobs') and rowsecurity) as private_tables;",
+  );
+  if (
+    !notesReady?.[0]?.trash_ready ||
+    !notesReady?.[0]?.import_ready ||
+    Number(notesReady?.[0]?.private_tables) !== 4
+  )
+    throw Error("Notes/deletion schema verification failed.");
   console.log(
-    "::notice title=Private event board schema::Private board tables, atomic linking RPCs, per-page highlights, search and private attachments verified; no event records changed.",
+    "::notice title=Private event board schema::Private board, notes, controlled import, deletion/trash, per-page highlights and search verified; no existing event contents changed.",
   );
 } catch (e) {
   console.error(e instanceof Error ? e.message : "Schema deployment failed.");

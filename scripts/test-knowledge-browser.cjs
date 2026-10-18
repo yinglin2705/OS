@@ -292,7 +292,13 @@ let downloads = 0;
       if (method === "POST")
         links.push({ id: crypto.randomUUID(), ...JSON.parse(req.postData()) });
       data = method === "POST" ? null : links;
-    } else
+    } else if (
+      /\/rest\/v1\/(notes|note_event_links|note_links|note_card_links|note_sources|file_deletion_jobs)$/.test(
+        u.pathname,
+      )
+    )
+      data = [];
+    else
       return route.fulfill({
         status: 400,
         json: { message: "Unhandled fixture endpoint" },

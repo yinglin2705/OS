@@ -36,7 +36,7 @@ export async function POST(req: Request) {
     );
   const [{ data: events, error: eventError }, { data: settings }] =
     await Promise.all([
-      session.from("events").select("*"),
+      session.from("events").select("*").is("deleted_at", null),
       session.from("users").select("timezone").eq("id", user.id).single(),
     ]);
   if (eventError)

@@ -6,6 +6,8 @@ on:
       - supabase/migrations/002_event_boards.sql
       - supabase/migrations/003_knowledge_workspace.sql
       - supabase/migrations/004_board_interactions.sql
+      - supabase/migrations/005_deletion_controls.sql
+      - supabase/migrations/006_course_notes.sql
       - scripts/deploy-event-boards.mjs
       - .github/workflows/deploy-event-boards.yml
   workflow_dispatch:

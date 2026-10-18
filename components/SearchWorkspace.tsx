@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { browserDB, configured } from "@/lib/supabase";
-import { loadKnowledge } from "@/lib/knowledge-client";
+import { loadKnowledge, deleteKnowledgeEdge } from "@/lib/knowledge-client";
 import {
   markdownFilename,
   neighborhood,
@@ -12,7 +12,8 @@ import {
 } from "@/lib/knowledge";
 type Hit = {
   node_id: string;
-  event_id: string;
+  event_id: string | null;
+  note_id?: string | null;
   card_id: string | null;
   title: string;
   excerpt: string;
@@ -21,6 +22,7 @@ type Hit = {
 };
 const labels: Record<string, string> = {
   event: "日程",
+  class_note: "课程笔记",
   note: "便签",
   image: "图片",
   link: "链接",
@@ -93,8 +95,14 @@ export default function SearchWorkspace() {
       ];
     }),
   );
-  const href = (n: { eventId: string; cardId?: string }) =>
-    `/events/${n.eventId}/board${n.cardId ? "#card-" + n.cardId : ""}`;
+  const href = (n: {
+    eventId?: string | null;
+    cardId?: string;
+    noteId?: string | null;
+  }) =>
+    n.noteId
+      ? `/notes?note=${n.noteId}`
+      : `/events/${n.eventId}/board${n.cardId ? "#card-" + n.cardId : ""}`;
   async function connect(target: Hit) {
     const source = nodes.find((n) => n.id === selected);
     if (!source || selected === target.node_id) {
@@ -104,14 +112,32 @@ export default function SearchWorkspace() {
     setBusy(true);
     setMessage("");
     try {
-      const r = await browserDB()
-        .from("knowledge_links")
-        .insert({
-          from_event: source.eventId,
-          from_card: source.cardId || null,
-          to_event: target.event_id,
-          to_card: target.card_id,
-        });
+      const db = browserDB();
+      let r;
+      if (source.noteId && target.note_id)
+        r = await db
+          .from("note_links")
+          .insert({ from_note: source.noteId, to_note: target.note_id });
+      else if (source.noteId || target.note_id) {
+        const noteId = source.noteId || target.note_id;
+        const eventId = source.noteId ? target.event_id : source.eventId;
+        const cardId = source.noteId ? target.card_id : source.cardId;
+        r = cardId
+          ? await db
+              .from("note_card_links")
+              .insert({ note_id: noteId, event_id: eventId, card_id: cardId })
+          : await db
+              .from("note_event_links")
+              .insert({ note_id: noteId, event_id: eventId });
+      } else
+        r = await db
+          .from("knowledge_links")
+          .insert({
+            from_event: source.eventId,
+            from_card: source.cardId || null,
+            to_event: target.event_id,
+            to_card: target.card_id,
+          });
       if (r.error) throw Error("关联未保存，请检查是否重复。");
       await refresh();
       setSelected("");
@@ -178,6 +204,16 @@ export default function SearchWorkspace() {
         throw Error("批注或布局无法读取，本次导出已停止。");
       if ((ink.data?.length || 0) >= 1000)
         throw Error("批注量超过本次导出上限，请分批备份；未生成不完整备份。");
+      const originals = await browserDB()
+        .from("note_sources")
+        .select("note_id,source_type,source_label,original_text")
+        .limit(1000);
+      if (originals.error || (originals.data?.length || 0) >= 1000)
+        throw Error("笔记原文无法完整导出，本次已停止。");
+      const originalJSON = JSON.stringify(originals.data, null, 2);
+      if (total + new Blob([originalJSON]).size > 100 * 1024 * 1024)
+        throw Error("备份超过100MB，请分批导出。");
+      zip.file("YING-note-sources.json", originalJSON);
       zip.file(
         "YING-board-layout-and-highlights.json",
         JSON.stringify(
@@ -280,6 +316,7 @@ export default function SearchWorkspace() {
                   href={href({
                     eventId: hit.event_id,
                     cardId: hit.card_id || undefined,
+                    noteId: hit.note_id,
                   })}
                 >
                   {hit.title}
@@ -360,11 +397,7 @@ export default function SearchWorkspace() {
                     onClick={async () => {
                       setBusy(true);
                       try {
-                        const r = await browserDB()
-                          .from("knowledge_links")
-                          .delete()
-                          .eq("id", e.id);
-                        if (r.error) throw Error("移除失败。");
+                        await deleteKnowledgeEdge(e);
                         await refresh();
                       } catch {
                         setMessage("移除关联失败，请重试。");

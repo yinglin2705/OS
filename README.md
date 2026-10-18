@@ -18,7 +18,7 @@
 | Google Calendar                                          | 支持导出 ICS 后导入；OAuth 双向同步未实现                            |
 | 邮件 / Push / 其他渠道发送                               | 未实现；当前通知处理器使用 Telegram，队列可扩展其他适配器            |
 | 重复活动                                                 | 保存重复标志和原始规则；尚未自动展开或发送重复实例提醒               |
-| 附件                                                     | 模型可存链接；没有文件上传 / 私有 Storage 管理界面                   |
+| 附件                                                     | 私有事件看板支持图片/PDF上传、翻页、等比缩放、批注及删除清理 |
 | 初始 DFPI Excel 迁移                                     | 待你上传真实文件；未猜测 Group A 时间或预约状态                      |
 
 来源最后核实时间没有被导入或用户点击“确认”伪造成已核实。来源备注与原始记录会保留。导入的单纯截止日期不会成为该日上课活动；第一志愿 / applied 不会变成 booked。
@@ -139,3 +139,13 @@ SQL Editor 管理员执行时没有用户会话，需使用你本人 user_id 过
 ## 事件看板、搜索与 Obsidian
 
 事件详情可进入私人看板，支持便签、图片、PDF和链接；输入侧栏可收起，画布可缩放。左侧「搜索与关联」可搜索日程和看板文字、建立跨事件关系，并导出含附件的 Markdown vault。Google OAuth 自动同步、PDF正文提取/OCR、Obsidian双向同步尚未实现。部署、权限和验证边界见 [私人资料工作区](docs/KNOWLEDGE_WORKSPACE.md)。
+
+## 课程笔记、课堂聊天导入与删除
+
+新增 `/notes` 独立课程笔记、`[[内部链接]]`、反向链接、日程关联；聊天整理先生成可编辑去重预览，一键确认后事务入库。规则模式不需模型密钥；可选 AI 模式需服务端 `OPENAI_API_KEY`，模型可通过 `OPENAI_NOTES_MODEL` 配置。没有直接访问私有 ChatGPT 聊天，须主动粘贴或上传导出。
+
+执行 `005_deletion_controls.sql`、`006_course_notes.sql`（在001–004之后）。推送 main 后，`deploy-event-boards.yml` 使用现有 GitHub Secret 自动应用并验证权限，不需复制 SQL。迁移不会修改用户内容、既有 Cron、Telegram 密钥或静音设置。
+
+`/trash` 恢复/永久删除日程和笔记，`/manage` 清理来源、历史、任务、导入与高级账号删除。附件删除失败保留清理队列；清理通知日志保留最小去重哈希以避免重复发送。
+
+操作步骤、删除边界、AuDHD 与 Obsidian / Notion / Figma 对标、未实现功能见 [功能审查](docs/PRODUCT_REVIEW.md)。`npm test`、`npm run test:db`，本地生产服务器运行后可用 `YING_BROWSER_BASE_URL=http://localhost:3090 node scripts/test-notes-browser.cjs` 验证隔离笔记界面。

@@ -9,6 +9,7 @@ import {
   type CalendarEvent,
 } from "@/supabase/functions/_shared/core";
 import Settings from "./Settings";
+import { deleteOwned } from "@/lib/deletion-client";
 type Event = Omit<CalendarEvent, "event_sources"> & {
   version: number;
   timezone: string;
@@ -17,6 +18,7 @@ type Event = Omit<CalendarEvent, "event_sources"> & {
   attachments?: string[];
   verified_at?: string;
   event_sources?: {
+    id?: string;
     url?: string | null;
     notes?: string | null;
     source_type?: string;
@@ -77,6 +79,8 @@ export default function Dashboard({
     [proposals, setProposals] = useState<Proposal[]>([]),
     [tasks, setTasks] = useState<Task[]>([]),
     [history, setHistory] = useState<History[]>([]);
+  const [showCompletedTasks, setShowCompletedTasks] = useState(false);
+  const openedEvent = useRef("");
   const [zone, setZone] = useState("Europe/London"),
     [anchor, setAnchor] = useState(
       DateTime.now().setZone("Europe/London").startOf("day"),
@@ -116,13 +120,18 @@ export default function Dashboard({
       db
         .from("events")
         .select("*,event_sources(*)")
+        .is("deleted_at", null)
         .order("start_at", { ascending: true }),
       db
         .from("change_proposals")
         .select("*")
         .eq("state", "pending")
         .order("created_at", { ascending: false }),
-      db.from("preparation_tasks").select("*").order("due_at"),
+      db
+        .from("preparation_tasks")
+        .select("*,events!inner(deleted_at)")
+        .is("events.deleted_at", null)
+        .order("due_at"),
       db
         .from("event_status_history")
         .select("*")
@@ -150,6 +159,20 @@ export default function Dashboard({
   useEffect(() => {
     if (timetable.current) timetable.current.scrollTop = 6 * 72;
   }, [tab, view, user, loading]); // Wait until the authenticated timetable is mounted.
+  useEffect(() => {
+    const id = new URL(window.location.href).searchParams.get("event");
+    if (!id || openedEvent.current === id) return;
+    const found = events.find((e) => e.id === id);
+    if (found) {
+      openedEvent.current = id;
+      setSelected(found);
+      if (found.start_at)
+        setAnchor(
+          DateTime.fromISO(found.start_at).setZone(zone).startOf("day"),
+        );
+      setTab("calendar");
+    }
+  }, [events, zone]);
   const visible = useMemo(
     () => events.filter((e) => category === "all" || e.category === category),
     [events, category],
@@ -394,7 +417,6 @@ export default function Dashboard({
             ["calendar", "◷", "日历"],
             ["inbox", "↳", "AI 收件箱"],
             ["preparation", "✓", "准备清单"],
-            ["history", "↺", "修改历史"],
             ["settings", "⚙", "设置与通知"],
           ].map(([key, icon, label]) => (
             <button
@@ -409,9 +431,27 @@ export default function Dashboard({
               )}
             </button>
           ))}
+          <a className="nav-search" href="/notes">
+            ▤ 课程笔记
+          </a>
           <a className="nav-search" href="/search">
             ⌕ 搜索与关联
           </a>
+          <details className="nav-tools">
+            <summary>更多与管理</summary>
+            <button
+              className={tab === "history" ? "active" : ""}
+              onClick={() => setTab("history")}
+            >
+              ↺ 修改历史
+            </button>
+            <a className="nav-search" href="/trash">
+              ♲ 回收站
+            </a>
+            <a className="nav-search" href="/manage">
+              管理与删除
+            </a>
+          </details>
         </nav>
         <div className="sidebar-foot">
           <p>DFPI · Bartlett</p>
@@ -864,6 +904,21 @@ export default function Dashboard({
                   >
                     确认更改
                   </button>
+                  <button
+                    disabled={busy}
+                    onClick={async () => {
+                      if (!window.confirm("删除这条提议？不会改变日程。"))
+                        return;
+                      try {
+                        await deleteOwned("proposal", p.id);
+                        await refresh();
+                      } catch (e) {
+                        setMessage(e instanceof Error ? e.message : "删除失败");
+                      }
+                    }}
+                  >
+                    删除提议
+                  </button>
                   <button disabled={busy} onClick={() => approve(p.id, false)}>
                     忽略
                   </button>
@@ -881,34 +936,52 @@ export default function Dashboard({
             <p className="muted">
               确认或预约活动后自动生成准备建议。通知需在设置页批准，可更改时间、延后或停用。
             </p>
-            {tasks.map((t) => (
-              <div className="task" key={t.id}>
-                <input
-                  aria-label={"完成 " + t.title}
-                  type="checkbox"
-                  checked={t.completed}
-                  onChange={async (e) => {
-                    const { error } = await browserDB()
-                      .from("preparation_tasks")
-                      .update({ completed: e.target.checked })
-                      .eq("id", t.id);
-                    if (error) setMessage(error.message);
-                    await refresh();
-                  }}
-                />
-                <div>
-                  <strong className={t.completed ? "done" : ""}>
-                    {t.title}
-                  </strong>
-                  <p>{t.reason}</p>
-                  <small>
-                    {t.due_at
-                      ? dt(t.due_at, zone).toFormat("dd/MM HH:mm")
-                      : "日期待核实"}
-                  </small>
+            <button onClick={() => setShowCompletedTasks(!showCompletedTasks)}>
+              {showCompletedTasks ? "隐藏已完成" : "显示已完成"}
+            </button>
+            {tasks
+              .filter((t) => showCompletedTasks || !t.completed)
+              .map((t) => (
+                <div className="task" key={t.id}>
+                  <input
+                    aria-label={"完成 " + t.title}
+                    type="checkbox"
+                    checked={t.completed}
+                    onChange={async (e) => {
+                      const { error } = await browserDB()
+                        .from("preparation_tasks")
+                        .update({ completed: e.target.checked })
+                        .eq("id", t.id);
+                      if (error) setMessage(error.message);
+                      await refresh();
+                    }}
+                  />
+                  <div>
+                    <strong className={t.completed ? "done" : ""}>
+                      {t.title}
+                    </strong>
+                    <p>{t.reason}</p>
+                    <small>
+                      {t.due_at
+                        ? dt(t.due_at, zone).toFormat("dd/MM HH:mm")
+                        : "日期待核实"}
+                    </small>
+                  </div>
+                  <button
+                    onClick={async () => {
+                      if (!window.confirm("删除这项准备任务及其提醒？")) return;
+                      try {
+                        await deleteOwned("task", t.id);
+                        await refresh();
+                      } catch (e) {
+                        setMessage(e instanceof Error ? e.message : "删除失败");
+                      }
+                    }}
+                  >
+                    删除任务
+                  </button>
                 </div>
-              </div>
-            ))}
+              ))}
             {!tasks.length && (
               <Empty text="确认有明确时间的活动后，这里会生成准备任务。" />
             )}
@@ -917,6 +990,24 @@ export default function Dashboard({
         {tab === "history" && (
           <section className="panel">
             <h2>最近 100 次修改</h2>
+            <button
+              disabled={busy || !history.length}
+              onClick={async () => {
+                if (
+                  !window.confirm(
+                    "永久清空日程修改历史？当前日程不变，此操作不能恢复。",
+                  )
+                )
+                  return;
+                const r = await browserDB().rpc("clear_owned_records", {
+                  record_type: "history",
+                });
+                if (r.error) setMessage("清空失败");
+                else await refresh();
+              }}
+            >
+              清空历史
+            </button>
             {history.map((h) => (
               <details className="history-row" key={h.id}>
                 <summary>
@@ -1013,6 +1104,38 @@ export default function Dashboard({
                 </div>
               ))}
             </dl>
+            <a className="board-open" href={`/notes?event=${selected.id}`}>
+              课程笔记 ↗
+            </a>
+            <button
+              className="danger-text"
+              disabled={busy}
+              onClick={async () => {
+                if (
+                  !window.confirm(
+                    "将此日程移入回收站？相关提醒会停止，看板和资料保留，可恢复。",
+                  )
+                )
+                  return;
+                setBusy(true);
+                try {
+                  const r = await browserDB().rpc("trash_event", {
+                    target: selected.id,
+                    restore: false,
+                  });
+                  if (r.error) throw Error("删除失败");
+                  setSelected(null);
+                  await refresh();
+                  setMessage("日程已移入回收站，后续提醒已停用。");
+                } catch (e) {
+                  setMessage(e instanceof Error ? e.message : "删除失败");
+                } finally {
+                  setBusy(false);
+                }
+              }}
+            >
+              移入回收站
+            </button>
             <p>{selected.description}</p>
             {selected.meeting_url && (
               <a href={selected.meeting_url} target="_blank" rel="noreferrer">
@@ -1124,10 +1247,16 @@ function EventEditor({
               priority: form.get("priority"),
               timezone: zone,
               mandatory: form.get("mandatory") === "on",
-              recurring: event?.recurring || false,
-              recurrence_rule: event?.recurrence_rule || null,
-              attachments: event?.attachments || [],
-              notes: event?.notes || null,
+              recurring: form.get("recurring") === "on",
+              recurrence_rule:
+                form.get("recurring") === "on"
+                  ? String(form.get("recurrence_rule") || "") || null
+                  : null,
+              attachments: String(form.get("attachments") || "")
+                .split(/\r?\n/)
+                .map((s) => s.trim())
+                .filter(Boolean),
+              notes: form.get("notes") || null,
             };
             for (const key of ["start_at", "end_at", "deadline_at"]) {
               const raw = String(form.get(key) || "");
@@ -1229,6 +1358,32 @@ function EventEditor({
             <textarea
               name="description"
               defaultValue={event?.description || ""}
+            />
+          </label>
+          <label>
+            附件链接（每行一个；清空即可移除）
+            <textarea
+              name="attachments"
+              defaultValue={event?.attachments?.join("\n") || ""}
+            />
+          </label>
+          <label>
+            个人备注
+            <textarea name="notes" defaultValue={event?.notes || ""} />
+          </label>
+          <label className="checkbox">
+            <input
+              type="checkbox"
+              name="recurring"
+              defaultChecked={event?.recurring}
+            />
+            重复活动
+          </label>
+          <label>
+            重复规则（可清空；当前不自动展开）
+            <input
+              name="recurrence_rule"
+              defaultValue={event?.recurrence_rule || ""}
             />
           </label>
           <button className="primary" disabled={busy}>

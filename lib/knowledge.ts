@@ -1,6 +1,7 @@
 export type KnowledgeNode = {
   id: string;
-  eventId: string;
+  eventId?: string;
+  noteId?: string;
   cardId?: string;
   title: string;
   body: string;

@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import PdfReader from "./PdfReader";
+import { deleteOwned, cleanupFiles } from "@/lib/deletion-client";
 import AnnotationSurface from "./AnnotationSurface";
 import {
   cardWidth,
@@ -141,6 +142,7 @@ export default function EventBoard({ eventId }: { eventId: string }) {
       const { data, error } = await db
         .from("events")
         .select("title")
+        .is("deleted_at", null)
         .eq("id", eventId)
         .single();
       if (error || !data) throw Error("活动不存在或没有访问权限。");
@@ -574,6 +576,8 @@ export default function EventBoard({ eventId }: { eventId: string }) {
           <Link href="/">← 日历</Link>
           <span className="board-separator"> / </span>
           <Link href="/search">搜索与关联</Link>
+          <span className="board-separator"> / </span>
+          <Link href={`/notes?event=${eventId}`}>课程笔记</Link>
           <h1>{title}</h1>
         </div>
         <span className="muted">私人资料墙</span>
@@ -632,6 +636,28 @@ export default function EventBoard({ eventId }: { eventId: string }) {
               ＋
             </button>
             <button onClick={fit}>适应内容</button>
+            <button
+              disabled={busy}
+              onClick={() => {
+                if (
+                  !window.confirm(
+                    "清空此事件看板的全部卡片、附件、连线和笔迹？无法恢复；日程与独立课程笔记保留。",
+                  )
+                )
+                  return;
+                void action(async () => {
+                  const r = await browserDB().rpc("clear_event_board", {
+                    target: eventId,
+                  });
+                  if (r.error) throw Error("清空失败");
+                  const failed = await cleanupFiles();
+                  if (failed)
+                    setMessage("看板已清空，部分附件待清理，可到回收站重试。");
+                });
+              }}
+            >
+              清空看板
+            </button>
           </div>
           <p className="board-gesture-hint">
             长按卡片后拖动连线；拖到空白处新建便签。⠿
@@ -919,22 +945,7 @@ export default function EventBoard({ eventId }: { eventId: string }) {
                           onClick={() => {
                             if (window.confirm("删除这张卡片及其连线？"))
                               void action(async () => {
-                                const db = browserDB();
-                                const r = await db
-                                  .from("event_board_cards")
-                                  .delete()
-                                  .eq("id", c.id)
-                                  .eq("event_id", eventId);
-                                if (r.error) throw Error("删除失败。");
-                                if (c.image_path) {
-                                  const removed = await db.storage
-                                    .from("event-board")
-                                    .remove([c.image_path]);
-                                  if (removed.error)
-                                    setMessage(
-                                      "卡片已删除，附件文件清理失败。",
-                                    );
-                                }
+                                await deleteOwned("card", c.id);
                               });
                           }}
                         >

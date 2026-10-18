@@ -384,18 +384,19 @@ let downloads = 0;
     await page.mouse.up();
     await page.waitForFunction(
       () =>
-        !Array.from(document.querySelectorAll(".annotation-tools")).some((e) =>
-          e.textContent.includes("保存中"),
+        !Array.from(document.querySelectorAll(".annotation-save-status")).some(
+          (e) => e.textContent.includes("保存中"),
         ),
     );
   }
-  await note.getByRole("button", { name: "荧光笔", exact: true }).click();
+  await page.getByRole("button", { name: "荧光笔", exact: true }).click();
+  assert.equal(await page.locator(".board-card .annotation-tools").count(), 0);
   await stroke(note);
   console.log("Note highlight saved.");
   assert.equal(highlights.length, 1);
   assert.equal(highlights[0].page, 0);
   assert(Math.abs(highlights[0].points[0][0] - 0.2) < 0.02);
-  await image.getByRole("button", { name: "荧光笔", exact: true }).click();
+
   await stroke(image);
   assert.equal(highlights.length, 2);
   const oldPath = await image
@@ -431,7 +432,7 @@ let downloads = 0;
     await image.locator(".highlight-overlay path").getAttribute("d"),
     oldPath,
   );
-  await pdf.getByRole("button", { name: "荧光笔", exact: true }).click();
+
   await stroke(pdf);
   assert.equal(highlights.at(-1).page, 1);
   await page.getByRole("button", { name: "PDF 下一页", exact: true }).click();
@@ -441,8 +442,8 @@ let downloads = 0;
   );
   await page.waitForFunction(
     () =>
-      document.querySelector(".board-pdf .annotation-tools button")
-        ?.textContent === "退出荧光笔",
+      document.querySelector(".board-pdf .annotation-unit")?.dataset.loading ===
+      "false",
   );
   assert.equal(await pdf.locator(".highlight-overlay path").count(), 0);
   await stroke(pdf);
@@ -453,7 +454,7 @@ let downloads = 0;
     document.querySelector(".board-pdf .highlight-overlay path"),
   );
   assert.equal(await pdf.locator(".highlight-overlay path").count(), 1);
-  await pdf.getByRole("button", { name: "退出荧光笔", exact: true }).click();
+  await page.getByRole("button", { name: "选择 / 移动", exact: true }).click();
   async function linkDrag(source, target, hold = true) {
     const a = await source.boundingBox(),
       b = await target.boundingBox();
@@ -534,8 +535,8 @@ let downloads = 0;
     await page.mouse.up();
     await page.waitForFunction(
       () =>
-        !Array.from(document.querySelectorAll(".annotation-tools")).some((e) =>
-          e.textContent.includes("保存中"),
+        !Array.from(document.querySelectorAll(".annotation-save-status")).some(
+          (e) => e.textContent.includes("保存中"),
         ),
     );
   }
@@ -543,21 +544,19 @@ let downloads = 0;
     erasePDF = page.locator(".board-pdf");
   const strokeTotal = highlights.length;
   const noteId = cards[0].id;
-  await eraseNote.getByRole("button", { name: "橡皮擦", exact: true }).click();
+  await page.getByRole("button", { name: "橡皮擦", exact: true }).click();
   await sweepErase(eraseNote);
   assert.equal(highlights.filter((h) => h.card_id === noteId).length, 0);
   assert.equal(highlights.length, strokeTotal - 1);
-  await eraseNote
-    .getByRole("button", { name: "撤销擦除", exact: true })
-    .click();
+  await page.getByRole("button", { name: "撤销擦除", exact: true }).click();
   await page.waitForFunction(
     () =>
-      !Array.from(document.querySelectorAll(".annotation-tools")).some((e) =>
-        e.textContent.includes("保存中"),
+      !Array.from(document.querySelectorAll(".annotation-save-status")).some(
+        (e) => e.textContent.includes("保存中"),
       ),
   );
   assert.equal(highlights.filter((h) => h.card_id === noteId).length, 1);
-  await erasePDF.getByRole("button", { name: "橡皮擦", exact: true }).click();
+
   await sweepErase(erasePDF);
   const pdfId = cards.find((c) => c.kind === "pdf").id;
   assert.equal(
@@ -570,9 +569,12 @@ let downloads = 0;
   );
   await page.getByRole("button", { name: "PDF 下一页", exact: true }).click();
   await page.getByText("2 / 2", { exact: true }).waitFor();
-  await erasePDF
-    .getByRole("button", { name: "退出橡皮擦", exact: true })
-    .waitFor();
+  assert.equal(
+    await page
+      .getByRole("button", { name: "橡皮擦", exact: true })
+      .getAttribute("aria-pressed"),
+    "true",
+  );
   await erasePDF
     .locator(".highlight-overlay path")
     .waitFor({ state: "attached" });
@@ -582,7 +584,8 @@ let downloads = 0;
   await page.getByText("1 / 2", { exact: true }).waitFor();
   await page.waitForFunction(
     () =>
-      !document.querySelector(".board-pdf .annotation-tools button")?.disabled,
+      document.querySelector(".board-pdf .annotation-unit")?.dataset.loading ===
+      "false",
   );
   assert.equal(
     await page.locator(".board-pdf .highlight-overlay path").count(),

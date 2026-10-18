@@ -24,8 +24,8 @@ export default function AnnotationSurface({
   active,
   color,
   tool,
-  onToolChange,
-  onToggle,
+  onActivate,
+  command,
   onError,
   children,
   disabled = false,
@@ -36,8 +36,8 @@ export default function AnnotationSurface({
   active: boolean;
   color: HighlightColor;
   tool: AnnotationTool;
-  onToolChange: (t: AnnotationTool) => void;
-  onToggle: () => void;
+  onActivate: () => void;
+  command?: { id: number; target: string; kind: "undo" | "restore" };
   onError: (s: string) => void;
   children: ReactNode;
   disabled?: boolean;
@@ -94,14 +94,6 @@ export default function AnnotationSurface({
       setCursor(null);
     }
   }, [active]);
-  function pickTool(next: AnnotationTool) {
-    setCursor(null);
-    if (active && tool === next) onToggle();
-    else {
-      onToolChange(next);
-      if (!active) onToggle();
-    }
-  }
   async function reloadAfterFailure() {
     const r = await browserDB()
       .from("board_highlights")
@@ -214,66 +206,52 @@ export default function AnnotationSurface({
       setSaving(false);
     }
   }
+  const lastCommand = useRef(command?.id);
+  useEffect(() => {
+    if (lastCommand.current === command?.id) return;
+    lastCommand.current = command?.id;
+    if (!command || command.target !== cardId || loading || saving || disabled)
+      return;
+    if (command.kind === "restore") void undoErase();
+    else if (strokes.length) void undoStroke();
+  }, [command?.id]);
+  async function undoStroke() {
+    if (lock.current) return;
+    lock.current = true;
+    setSaving(true);
+    const last = strokes.at(-1)!;
+    try {
+      const r = await browserDB()
+        .from("board_highlights")
+        .delete()
+        .eq("id", last.id)
+        .eq("card_id", cardId)
+        .eq("page", page);
+      if (r.error) throw Error();
+      setStrokes((s) => s.filter((x) => x.id !== last.id));
+      setErased((s) => [...s, [last]]);
+    } catch {
+      await reloadAfterFailure().catch(() => setUnavailable(true));
+      onError("撤销结果未确认，请检查后重试。");
+    } finally {
+      lock.current = false;
+      setSaving(false);
+    }
+  }
   const path = (points: Point[]) =>
     points
       .map(([x, y], i) => `${i ? "L" : "M"} ${x * 1000} ${y * 1000}`)
       .join(" ") + (points.length === 1 ? " l 0.1 0.1" : "");
   return (
-    <div className={`annotation-unit ${active ? "annotation-active" : ""}`}>
-      <div className="annotation-tools" data-no-connect>
-        <button
-          disabled={loading || unavailable || saving || disabled}
-          aria-pressed={active && tool === "pen"}
-          onClick={() => pickTool("pen")}
-        >
-          {active && tool === "pen" ? "退出荧光笔" : "荧光笔"}
-        </button>
-        <button
-          disabled={loading || unavailable || saving || disabled}
-          aria-pressed={active && tool === "eraser"}
-          title="拖过笔迹，整笔擦除"
-          onClick={() => pickTool("eraser")}
-        >
-          {active && tool === "eraser" ? "退出橡皮擦" : "橡皮擦"}
-        </button>
-        <button
-          disabled={
-            loading || unavailable || saving || disabled || !erased.length
-          }
-          onClick={() => void undoErase()}
-        >
-          撤销擦除
-        </button>
-        <button
-          disabled={loading || saving || disabled || !strokes.length}
-          onClick={async () => {
-            if (lock.current) return;
-            lock.current = true;
-            setSaving(true);
-            const last = strokes.at(-1)!;
-            try {
-              const r = await browserDB()
-                .from("board_highlights")
-                .delete()
-                .eq("id", last.id)
-                .eq("card_id", cardId)
-                .eq("page", page);
-              if (r.error) throw Error();
-              setStrokes((s) => s.filter((x) => x.id !== last.id));
-              setErased((s) => [...s, [last]]);
-            } catch {
-              await reloadAfterFailure().catch(() => setUnavailable(true));
-              onError("撤销结果未确认，请检查后重试。");
-            } finally {
-              lock.current = false;
-              setSaving(false);
-            }
-          }}
-        >
-          撤销一笔
-        </button>
-        {saving && <span role="status">保存中…</span>}
-      </div>
+    <div
+      className={`annotation-unit ${active ? "annotation-active" : ""}`}
+      data-loading={loading || disabled}
+    >
+      {saving && (
+        <span className="annotation-save-status" role="status">
+          保存中…
+        </span>
+      )}
       <div className="annotation-surface">
         {children}
         <svg
@@ -291,6 +269,7 @@ export default function AnnotationSurface({
           style={{ pointerEvents: enabled ? "auto" : "none" }}
           onPointerDown={(e) => {
             if (e.button !== 0 || !enabled || drawing.current) return;
+            onActivate();
             e.preventDefault();
             e.stopPropagation();
             e.currentTarget.setPointerCapture(e.pointerId);

@@ -62,6 +62,12 @@ export default function EventBoard({ eventId }: { eventId: string }) {
     [editing, setEditing] = useState<Card | null>(null);
   const [from, setFrom] = useState(""),
     [to, setTo] = useState("");
+  const [annotationEnabled, setAnnotationEnabled] = useState(false);
+  const [annotationCommand, setAnnotationCommand] = useState<{
+    id: number;
+    target: string;
+    kind: "undo" | "restore";
+  }>();
   const [annotationTool, setAnnotationTool] = useState<"pen" | "eraser">("pen");
   const [highlightCard, setHighlightCard] = useState(""),
     [penColor, setPenColor] = useState<HighlightColor>("yellow");
@@ -462,7 +468,7 @@ export default function EventBoard({ eventId }: { eventId: string }) {
       press.current ||
       drag.current ||
       resize.current ||
-      highlightCard === card.id
+      annotationEnabled
     )
       return;
     if (
@@ -603,6 +609,63 @@ export default function EventBoard({ eventId }: { eventId: string }) {
             <button aria-expanded={linker} onClick={() => setLinker(!linker)}>
               连接资料
             </button>
+            <div
+              className="board-drawing-tools"
+              role="group"
+              aria-label="批注工具"
+            >
+              <button
+                aria-pressed={!annotationEnabled}
+                onClick={() => setAnnotationEnabled(false)}
+              >
+                选择 / 移动
+              </button>
+              <button
+                aria-pressed={annotationEnabled && annotationTool === "pen"}
+                onClick={() => {
+                  setAnnotationTool("pen");
+                  setAnnotationEnabled(true);
+                }}
+              >
+                荧光笔
+              </button>
+              <button
+                aria-pressed={annotationEnabled && annotationTool === "eraser"}
+                title="拖过笔迹，整笔擦除"
+                onClick={() => {
+                  setAnnotationTool("eraser");
+                  setAnnotationEnabled(true);
+                }}
+              >
+                橡皮擦
+              </button>
+              <button
+                disabled={!highlightCard}
+                title="撤销最近操作的资料当前页上的一笔"
+                onClick={() =>
+                  setAnnotationCommand({
+                    id: Date.now(),
+                    target: highlightCard,
+                    kind: "undo",
+                  })
+                }
+              >
+                撤销一笔
+              </button>
+              <button
+                disabled={!highlightCard}
+                title="恢复最近操作的资料当前页上的擦除"
+                onClick={() =>
+                  setAnnotationCommand({
+                    id: Date.now(),
+                    target: highlightCard,
+                    kind: "restore",
+                  })
+                }
+              >
+                撤销擦除
+              </button>
+            </div>
             <label className="board-pen-color">
               笔色
               <select
@@ -961,13 +1024,11 @@ export default function EventBoard({ eventId }: { eventId: string }) {
                           }
                           eventId={eventId}
                           cardId={c.id}
-                          active={highlightCard === c.id}
+                          active={annotationEnabled}
                           color={penColor}
                           tool={annotationTool}
-                          onToolChange={setAnnotationTool}
-                          onToggle={() =>
-                            setHighlightCard(highlightCard === c.id ? "" : c.id)
-                          }
+                          command={annotationCommand}
+                          onActivate={() => setHighlightCard(c.id)}
                           onError={setMessage}
                           disabled={busy}
                         />
@@ -977,13 +1038,11 @@ export default function EventBoard({ eventId }: { eventId: string }) {
                           eventId={eventId}
                           cardId={c.id}
                           page={0}
-                          active={highlightCard === c.id}
+                          active={annotationEnabled}
                           color={penColor}
                           tool={annotationTool}
-                          onToolChange={setAnnotationTool}
-                          onToggle={() =>
-                            setHighlightCard(highlightCard === c.id ? "" : c.id)
-                          }
+                          command={annotationCommand}
+                          onActivate={() => setHighlightCard(c.id)}
                           onError={setMessage}
                         >
                           {c.signedURL ? (
@@ -1007,13 +1066,11 @@ export default function EventBoard({ eventId }: { eventId: string }) {
                           eventId={eventId}
                           cardId={c.id}
                           page={0}
-                          active={highlightCard === c.id}
+                          active={annotationEnabled}
                           color={penColor}
                           tool={annotationTool}
-                          onToolChange={setAnnotationTool}
-                          onToggle={() =>
-                            setHighlightCard(highlightCard === c.id ? "" : c.id)
-                          }
+                          command={annotationCommand}
+                          onActivate={() => setHighlightCard(c.id)}
                           onError={setMessage}
                         >
                           <div className="board-card-content board-note-surface">

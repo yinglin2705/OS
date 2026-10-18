@@ -12,8 +12,8 @@ export default function PdfReader({
   active,
   color,
   tool,
-  onToolChange,
-  onToggle,
+  onActivate,
+  command,
   onError,
   disabled,
 }: {
@@ -25,8 +25,8 @@ export default function PdfReader({
   active: boolean;
   color: HighlightColor;
   tool: "pen" | "eraser";
-  onToolChange: (t: "pen" | "eraser") => void;
-  onToggle: () => void;
+  onActivate: () => void;
+  command?: { id: number; target: string; kind: "undo" | "restore" };
   onError: (s: string) => void;
   disabled: boolean;
 }) {
@@ -152,9 +152,9 @@ export default function PdfReader({
           active={active && !rendering && !!doc}
           color={color}
           tool={tool}
-          onToolChange={onToolChange}
+          command={command}
           disabled={!doc || rendering}
-          onToggle={onToggle}
+          onActivate={onActivate}
           onError={onError}
         >
           <canvas

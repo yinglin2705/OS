@@ -6,3 +6,6 @@ coverage/
 *.tsbuildinfo
 supabase/.temp/
 supabase/.branches/
+
+# Generated from the pinned pdfjs-dist dependency during build
+/public/pdfjs/

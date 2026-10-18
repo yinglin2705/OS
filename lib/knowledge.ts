@@ -23,10 +23,11 @@ export function dragPosition(
   origin: { x: number; y: number },
   delta: { x: number; y: number },
   zoom: number,
+  limit = 1700,
 ) {
   return {
-    x: Math.max(0, Math.min(1700, Math.round(origin.x + delta.x / zoom))),
-    y: Math.max(0, Math.min(1700, Math.round(origin.y + delta.y / zoom))),
+    x: Math.max(0, Math.min(limit, Math.round(origin.x + delta.x / zoom))),
+    y: Math.max(0, Math.min(limit, Math.round(origin.y + delta.y / zoom))),
   };
 }
 export function references(body: string): string[] {

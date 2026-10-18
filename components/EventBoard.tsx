@@ -1,8 +1,23 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import PdfReader from "./PdfReader";
+import AnnotationSurface from "./AnnotationSurface";
+import {
+  cardWidth,
+  edgeAnchors,
+  resizedWidth,
+  LONG_PRESS_MS,
+  highlightColors,
+  type HighlightColor,
+} from "@/lib/board-interactions";
 import { browserDB, configured } from "@/lib/supabase";
 import { dragPosition, zoomValue, nextCardPosition } from "@/lib/knowledge";
+const boardPosition = (
+  origin: { x: number; y: number },
+  delta: { x: number; y: number },
+  zoom: number,
+) => dragPosition(origin, delta, zoom, 20000);
 type Card = {
   id: string;
   kind: "note" | "link" | "image" | "pdf";
@@ -14,6 +29,8 @@ type Card = {
   color: "yellow" | "pink" | "blue" | "green";
   x: number;
   y: number;
+  display_width?: number;
+  pdf_page?: number;
   signedURL?: string;
 };
 type Edge = { id: string; from_card: string; to_card: string };
@@ -44,6 +61,34 @@ export default function EventBoard({ eventId }: { eventId: string }) {
     [editing, setEditing] = useState<Card | null>(null);
   const [from, setFrom] = useState(""),
     [to, setTo] = useState("");
+  const [highlightCard, setHighlightCard] = useState(""),
+    [penColor, setPenColor] = useState<HighlightColor>("yellow");
+  const [preview, setPreview] = useState<{
+    source: string;
+    x: number;
+    y: number;
+    target: string | null;
+  } | null>(null);
+  const [newOrigin, setNewOrigin] = useState<{
+    source: string;
+    position: { x: number; y: number };
+  } | null>(null);
+  const press = useRef<{
+    source: string;
+    pointer: number;
+    startX: number;
+    startY: number;
+    active: boolean;
+    timer?: ReturnType<typeof setTimeout>;
+  } | null>(null);
+  const suppressClick = useRef(false);
+  const resize = useRef<{
+    id: string;
+    pointer: number;
+    startX: number;
+    width: number;
+  } | null>(null);
+  const [scene, setScene] = useState({ width: 3200, height: 3200 });
   const focused = useRef(false);
   const viewport = useRef<HTMLDivElement>(null),
     fileInput = useRef<HTMLInputElement>(null),
@@ -124,6 +169,25 @@ export default function EventBoard({ eventId }: { eventId: string }) {
       }
     });
   }, [cards]);
+  useEffect(() => {
+    const root = viewport.current;
+    if (!root) return;
+    const measure = () => {
+      let width = 3200,
+        height = 3200;
+      root.querySelectorAll<HTMLElement>(".board-card").forEach((el) => {
+        width = Math.max(width, el.offsetLeft + el.offsetWidth + 100);
+        height = Math.max(height, el.offsetTop + el.offsetHeight + 100);
+      });
+      setScene((old) =>
+        old.width === width && old.height === height ? old : { width, height },
+      );
+    };
+    const observer = new ResizeObserver(measure);
+    root.querySelectorAll(".board-card").forEach((el) => observer.observe(el));
+    measure();
+    return () => observer.disconnect();
+  }, [cards]);
   function changeZoom(value: number, point?: { x: number; y: number }) {
     const next = zoomValue(value),
       el = viewport.current;
@@ -171,7 +235,8 @@ export default function EventBoard({ eventId }: { eventId: string }) {
       setBusy(false);
     }
   }
-  function startNew(type: Card["kind"]) {
+  function startNew(type: Card["kind"], origin: typeof newOrigin = null) {
+    setNewOrigin(origin);
     setEditing(null);
     setKind(type);
     setNewTitle("");
@@ -181,6 +246,7 @@ export default function EventBoard({ eventId }: { eventId: string }) {
     setComposer(true);
   }
   function editCard(c: Card) {
+    setNewOrigin(null);
     setEditing(c);
     setKind(c.kind);
     setNewTitle(c.title);
@@ -215,6 +281,16 @@ export default function EventBoard({ eventId }: { eventId: string }) {
           .select("id")
           .single();
         if (error) throw Error("未能保存修改，草稿已保留。");
+      } else if (newOrigin) {
+        const { error } = await db.rpc("create_linked_board_note", {
+          source_card: newOrigin.source,
+          note_title: newTitle.trim(),
+          note_body: body,
+          position_x: newOrigin.position.x,
+          position_y: newOrigin.position.y,
+          note_color: color,
+        });
+        if (error) throw Error("新便签及连线未保存，输入内容已保留。");
       } else {
         let path: string | null = null;
         if (kind === "image" || kind === "pdf") {
@@ -243,31 +319,31 @@ export default function EventBoard({ eventId }: { eventId: string }) {
         const el = viewport.current;
         const pos = nextCardPosition(
           cards,
-          dragPosition(
+          boardPosition(
             { x: 0, y: 0 },
             { x: el ? el.scrollLeft + 80 : 40, y: el ? el.scrollTop + 80 : 40 },
             zoom,
           ),
         );
-        const { error } = await db
-          .from("event_board_cards")
-          .insert({
-            user_id: userId,
-            event_id: eventId,
-            kind,
-            title: newTitle.trim(),
-            body,
-            url: link,
-            color,
-            image_path: path,
-            original_filename: path ? file?.name.slice(0, 255) : null,
-            ...pos,
-          });
+        const { error } = await db.from("event_board_cards").insert({
+          user_id: userId,
+          event_id: eventId,
+          kind,
+          title: newTitle.trim(),
+          body,
+          url: link,
+          color,
+          image_path: path,
+          original_filename: path ? file?.name.slice(0, 255) : null,
+          display_width: cardWidth({ kind }),
+          ...pos,
+        });
         if (error) {
           if (path) await db.storage.from("event-board").remove([path]);
           throw Error("卡片未能保存，输入内容已保留。");
         }
       }
+      setNewOrigin(null);
       setComposer(false);
       setEditing(null);
       setNewTitle("");
@@ -305,18 +381,185 @@ export default function EventBoard({ eventId }: { eventId: string }) {
         c,
         cancel
           ? { x: d.x, y: d.y }
-          : dragPosition(
+          : boardPosition(
               d,
               { x: e.clientX - d.startX, y: e.clientY - d.startY },
               zoom,
             ),
       );
   }
+  async function persistView(
+    card: Card,
+    patch: { display_width?: number; pdf_page?: number },
+    rollback = patch.display_width === undefined
+      ? { pdf_page: card.pdf_page || 1 }
+      : { display_width: card.display_width || cardWidth(card) },
+  ) {
+    if (lock.current) return;
+    lock.current = true;
+    setBusy(true);
+    setMessage("");
+    setCards((cs) =>
+      cs.map((c) => (c.id === card.id ? { ...c, ...patch } : c)),
+    );
+    try {
+      const r = await browserDB()
+        .from("event_board_cards")
+        .update(patch)
+        .eq("id", card.id)
+        .eq("event_id", eventId)
+        .select("id")
+        .single();
+      if (r.error) throw Error();
+    } catch {
+      setCards((cs) =>
+        cs.map((c) => (c.id === card.id ? { ...c, ...rollback } : c)),
+      );
+      setMessage("视图更改未保存，已恢复原状态。");
+    } finally {
+      lock.current = false;
+      setBusy(false);
+    }
+  }
+  async function connectCards(source: string, target: string) {
+    await action(async () => {
+      const r = await browserDB().rpc("connect_board_cards", {
+        source_card: source,
+        target_card: target,
+      });
+      if (r.error)
+        throw Error(
+          r.error.code === "PGRST202"
+            ? "连线数据库更新尚未部署，请稍后刷新。"
+            : "连线未保存，请刷新后重试。",
+        );
+      setMessage("已连接，两张卡片的关系已保存。");
+    });
+  }
+  function worldPoint(x: number, y: number) {
+    const el = viewport.current?.querySelector(".board-canvas");
+    if (!el) return { x: 0, y: 0 };
+    const rect = el.getBoundingClientRect();
+    return { x: (x - rect.left) / zoom, y: (y - rect.top) / zoom };
+  }
+  function targetCard(x: number, y: number) {
+    return (
+      document.elementFromPoint(x, y)?.closest<HTMLElement>("[data-card-id]")
+        ?.dataset.cardId || null
+    );
+  }
+  function beginConnection(
+    e: React.PointerEvent<HTMLElement>,
+    card: Card,
+    immediate = false,
+  ) {
+    if (
+      e.button !== 0 ||
+      busy ||
+      press.current ||
+      drag.current ||
+      resize.current ||
+      highlightCard === card.id
+    )
+      return;
+    if (
+      !immediate &&
+      (e.target as Element).closest(
+        "button,a,input,textarea,select,[data-no-connect]",
+      )
+    )
+      return;
+    if (immediate) {
+      e.stopPropagation();
+      e.preventDefault();
+    }
+    suppressClick.current = false;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    const state = {
+      source: card.id,
+      pointer: e.pointerId,
+      startX: e.clientX,
+      startY: e.clientY,
+      active: immediate,
+      timer: undefined as ReturnType<typeof setTimeout> | undefined,
+    };
+    press.current = state;
+    const activate = () => {
+      if (press.current !== state) return;
+      state.active = true;
+      suppressClick.current = true;
+      const point = worldPoint(state.startX, state.startY);
+      setPreview({ source: card.id, ...point, target: null });
+      setMessage("拖到另一张卡片连线，或拖到空白处新建便签。");
+    };
+    if (immediate) activate();
+    else state.timer = setTimeout(activate, LONG_PRESS_MS);
+  }
+  function moveConnection(e: React.PointerEvent<HTMLElement>) {
+    const p = press.current;
+    if (!p || p.pointer !== e.pointerId) return;
+    if (!p.active) {
+      if (Math.hypot(e.clientX - p.startX, e.clientY - p.startY) > 8) {
+        clearTimeout(p.timer);
+        press.current = null;
+      }
+      return;
+    }
+    e.preventDefault();
+    e.stopPropagation();
+    const point = worldPoint(e.clientX, e.clientY);
+    const target = targetCard(e.clientX, e.clientY);
+    setPreview({
+      source: p.source,
+      ...point,
+      target: target === p.source ? null : target,
+    });
+  }
+  function endConnection(e: React.PointerEvent<HTMLElement>, cancel = false) {
+    const p = press.current;
+    if (!p || p.pointer !== e.pointerId) return;
+    clearTimeout(p.timer);
+    press.current = null;
+    setPreview(null);
+    setTimeout(() => {
+      suppressClick.current = false;
+    }, 0);
+    if (!p.active || cancel) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const target = targetCard(e.clientX, e.clientY);
+    if (target && target !== p.source) {
+      void connectCards(p.source, target);
+      return;
+    }
+    if (
+      !target &&
+      document.elementFromPoint(e.clientX, e.clientY)?.closest(".board-canvas")
+    ) {
+      const point = worldPoint(e.clientX, e.clientY);
+      startNew("note", {
+        source: p.source,
+        position: boardPosition({ x: 0, y: 0 }, point, 1),
+      });
+      setMessage("输入便签内容，保存后自动连接；收起或取消不会创建空便签。");
+    }
+  }
+  useEffect(
+    () => () => {
+      if (press.current) clearTimeout(press.current.timer);
+    },
+    [],
+  );
   function fit() {
     const el = viewport.current;
     if (!el) return;
-    const maxX = Math.max(700, ...cards.map((c) => c.x + 300)),
-      maxY = Math.max(400, ...cards.map((c) => c.y + 600));
+    const maxX = Math.max(700, ...cards.map((c) => c.x + cardWidth(c) + 40)),
+      maxY = Math.max(
+        400,
+        ...cards.map(
+          (c) => c.y + (c.kind === "pdf" ? cardWidth(c) * 1.5 + 200 : 650),
+        ),
+      );
     setZoom(zoomValue(Math.min(el.clientWidth / maxX, el.clientHeight / maxY)));
     requestAnimationFrame(() => {
       el.scrollLeft = 0;
@@ -355,6 +598,20 @@ export default function EventBoard({ eventId }: { eventId: string }) {
             <button aria-expanded={linker} onClick={() => setLinker(!linker)}>
               连接资料
             </button>
+            <label className="board-pen-color">
+              笔色
+              <select
+                aria-label="荧光笔颜色"
+                value={penColor}
+                onChange={(e) => setPenColor(e.target.value as HighlightColor)}
+              >
+                {Object.keys(highlightColors).map((c) => (
+                  <option key={c} value={c}>
+                    {{ yellow: "黄", pink: "粉", green: "绿", blue: "蓝" }[c]}
+                  </option>
+                ))}
+              </select>
+            </label>
             <span className="board-toolbar-spacer" />
             <button
               onClick={() => changeZoom(zoom - 0.1)}
@@ -375,6 +632,10 @@ export default function EventBoard({ eventId }: { eventId: string }) {
             </button>
             <button onClick={fit}>适应内容</button>
           </div>
+          <p className="board-gesture-hint">
+            长按卡片后拖动连线；拖到空白处新建便签。⠿
+            移动位置，右下角等比调整图片 / PDF。
+          </p>
           <div className={`board-layout ${composer ? "with-composer" : ""}`}>
             {composer && (
               <aside className="board-drawer" id="board-composer">
@@ -397,6 +658,23 @@ export default function EventBoard({ eventId }: { eventId: string }) {
                       ×
                     </button>
                   </div>
+                  {newOrigin && (
+                    <p className="notice">
+                      保存后连接到「
+                      {cards.find((c) => c.id === newOrigin.source)?.title ||
+                        "原卡片"}
+                      」。
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setNewOrigin(null);
+                          setComposer(false);
+                        }}
+                      >
+                        取消新建
+                      </button>
+                    </p>
+                  )}
                   <label>
                     标题
                     <input
@@ -489,31 +767,50 @@ export default function EventBoard({ eventId }: { eventId: string }) {
             >
               <div
                 className="board-stage"
-                style={{ width: 2500 * zoom, height: 2500 * zoom }}
+                style={{
+                  width: scene.width * zoom,
+                  height: scene.height * zoom,
+                }}
               >
                 <div
                   className="board-canvas"
                   style={{
+                    width: scene.width,
+                    height: scene.height,
                     transform: `scale(${zoom})`,
                     transformOrigin: "top left",
                   }}
                 >
                   <svg
                     className="board-wires"
-                    width="2500"
-                    height="2500"
+                    width={scene.width}
+                    height={scene.height}
                     aria-hidden="true"
                   >
                     {edges.map((e) => {
                       const a = cards.find((c) => c.id === e.from_card),
                         b = cards.find((c) => c.id === e.to_card);
-                      return a && b ? (
+                      if (!a || !b) return null;
+                      const { start, end } = edgeAnchors(a, b);
+                      return (
                         <path
                           key={e.id}
-                          d={`M ${a.x + 135} ${a.y + 35} Q ${(a.x + b.x) / 2 + 160} ${(a.y + b.y) / 2 - 60} ${b.x + 135} ${b.y + 35}`}
+                          d={`M ${start.x} ${start.y} C ${(start.x + end.x) / 2} ${start.y - 40} ${(start.x + end.x) / 2} ${end.y - 40} ${end.x} ${end.y}`}
                         />
-                      ) : null;
+                      );
                     })}
+                    {preview &&
+                      (() => {
+                        const source = cards.find(
+                          (c) => c.id === preview.source,
+                        );
+                        return source ? (
+                          <path
+                            className="board-wire-preview"
+                            d={`M ${source.x + cardWidth(source)} ${source.y + 50} L ${preview.x} ${preview.y}`}
+                          />
+                        ) : null;
+                      })()}
                   </svg>
                   {!cards.length && (
                     <div className="board-empty">
@@ -527,8 +824,20 @@ export default function EventBoard({ eventId }: { eventId: string }) {
                     <article
                       id={`card-${c.id}`}
                       key={c.id}
-                      className={`board-card board-${c.kind} paper-${c.color || "yellow"}`}
-                      style={{ left: c.x, top: c.y }}
+                      data-card-id={c.id}
+                      className={`board-card board-${c.kind} paper-${c.color || "yellow"} ${preview?.target === c.id ? "connection-target" : ""}`}
+                      style={{ left: c.x, top: c.y, width: cardWidth(c) }}
+                      onPointerDown={(e) => beginConnection(e, c)}
+                      onPointerMove={moveConnection}
+                      onPointerUp={(e) => endConnection(e)}
+                      onPointerCancel={(e) => endConnection(e, true)}
+                      onClickCapture={(e) => {
+                        if (suppressClick.current) {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          suppressClick.current = false;
+                        }
+                      }}
                     >
                       <div className="board-card-tools">
                         <button
@@ -555,7 +864,7 @@ export default function EventBoard({ eventId }: { eventId: string }) {
                               d.pointer !== e.pointerId
                             )
                               return;
-                            const pos = dragPosition(
+                            const pos = boardPosition(
                               d,
                               {
                                 x: e.clientX - d.startX,
@@ -583,10 +892,22 @@ export default function EventBoard({ eventId }: { eventId: string }) {
                             };
                             if (!deltas[e.key]) return;
                             e.preventDefault();
-                            void moveCard(c, dragPosition(c, deltas[e.key], 1));
+                            void moveCard(
+                              c,
+                              boardPosition(c, deltas[e.key], 1),
+                            );
                           }}
                         >
                           ⠿
+                        </button>
+                        <button
+                          className="board-connect-handle"
+                          aria-label={`从卡片${i + 1}拖出连线`}
+                          title="拖到另一张卡片或空白处"
+                          disabled={busy}
+                          onPointerDown={(e) => beginConnection(e, c, true)}
+                        >
+                          ↗ 连线
                         </button>
                         <button onClick={() => editCard(c)} disabled={busy}>
                           编辑
@@ -619,60 +940,198 @@ export default function EventBoard({ eventId }: { eventId: string }) {
                           ×
                         </button>
                       </div>
-                      {c.kind === "image" &&
-                        (c.signedURL ? (
-                          <a
-                            className="board-photo"
-                            href={c.signedURL}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                          >
-                            <img
-                              src={c.signedURL}
-                              alt={c.title || "事件资料图片"}
-                              onError={() =>
-                                setMessage("图片链接可能已过期，请刷新页面。")
-                              }
-                            />
-                          </a>
-                        ) : (
-                          <p>图片暂时无法读取，请刷新。</p>
-                        ))}
-                      <div className="board-card-content">
-                        {c.kind === "pdf" && (
-                          <p className="board-pdf-label">
-                            ▤ PDF · {c.original_filename}
-                          </p>
-                        )}
-                        {c.title && <h3>{c.title}</h3>}
-                        {c.body && <p className="board-card-body">{c.body}</p>}
-                        {c.url && /^https?:\/\//i.test(c.url) && (
-                          <a
-                            href={c.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                          >
-                            打开来源 ↗
-                          </a>
-                        )}
-                        {c.kind === "pdf" && c.signedURL && (
-                          <a
-                            href={c.signedURL}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                          >
-                            打开 PDF ↗
-                          </a>
-                        )}
-                        {c.kind === "image" && !c.body && (
-                          <button
-                            className="board-caption-add"
-                            onClick={() => editCard(c)}
-                          >
-                            ＋ 添加文字记录
-                          </button>
-                        )}
-                      </div>
+                      {c.kind === "pdf" && c.signedURL && (
+                        <PdfReader
+                          url={c.signedURL}
+                          page={c.pdf_page || 1}
+                          onPage={(page) =>
+                            void persistView(c, { pdf_page: page })
+                          }
+                          eventId={eventId}
+                          cardId={c.id}
+                          active={highlightCard === c.id}
+                          color={penColor}
+                          onToggle={() =>
+                            setHighlightCard(highlightCard === c.id ? "" : c.id)
+                          }
+                          onError={setMessage}
+                          disabled={busy}
+                        />
+                      )}
+                      {c.kind === "image" && (
+                        <AnnotationSurface
+                          eventId={eventId}
+                          cardId={c.id}
+                          page={0}
+                          active={highlightCard === c.id}
+                          color={penColor}
+                          onToggle={() =>
+                            setHighlightCard(highlightCard === c.id ? "" : c.id)
+                          }
+                          onError={setMessage}
+                        >
+                          {c.signedURL ? (
+                            <div className="board-photo">
+                              <img
+                                src={c.signedURL}
+                                alt={c.title || "事件资料图片"}
+                                draggable={false}
+                                onError={() =>
+                                  setMessage("图片链接可能已过期，请刷新页面。")
+                                }
+                              />
+                            </div>
+                          ) : (
+                            <p>图片暂时无法读取，请刷新。</p>
+                          )}
+                        </AnnotationSurface>
+                      )}
+                      {c.kind === "note" ? (
+                        <AnnotationSurface
+                          eventId={eventId}
+                          cardId={c.id}
+                          page={0}
+                          active={highlightCard === c.id}
+                          color={penColor}
+                          onToggle={() =>
+                            setHighlightCard(highlightCard === c.id ? "" : c.id)
+                          }
+                          onError={setMessage}
+                        >
+                          <div className="board-card-content board-note-surface">
+                            {c.title && <h3>{c.title}</h3>}
+                            {c.body && (
+                              <p className="board-card-body">{c.body}</p>
+                            )}
+                          </div>
+                        </AnnotationSurface>
+                      ) : (
+                        <div className="board-card-content">
+                          {c.kind === "pdf" && (
+                            <p className="board-pdf-label">
+                              ▤ PDF · {c.original_filename}
+                            </p>
+                          )}
+                          {c.title && <h3>{c.title}</h3>}
+                          {c.body && (
+                            <p className="board-card-body">{c.body}</p>
+                          )}
+                          {c.url && /^https?:\/\//i.test(c.url) && (
+                            <a
+                              href={c.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                            >
+                              打开来源 ↗
+                            </a>
+                          )}
+                          {c.kind === "image" && c.signedURL && (
+                            <a
+                              href={c.signedURL}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                            >
+                              原图 ↗
+                            </a>
+                          )}
+                          {c.kind === "image" && !c.body && (
+                            <button
+                              className="board-caption-add"
+                              onClick={() => editCard(c)}
+                            >
+                              ＋ 添加文字记录
+                            </button>
+                          )}
+                        </div>
+                      )}
+                      {(c.kind === "image" || c.kind === "pdf") && (
+                        <button
+                          className="board-resize"
+                          aria-label={`等比调整卡片${i + 1}大小`}
+                          disabled={busy}
+                          onPointerDown={(e) => {
+                            if (e.button !== 0) return;
+                            e.stopPropagation();
+                            e.preventDefault();
+                            e.currentTarget.setPointerCapture(e.pointerId);
+                            resize.current = {
+                              id: c.id,
+                              pointer: e.pointerId,
+                              startX: e.clientX,
+                              width: cardWidth(c),
+                            };
+                          }}
+                          onPointerMove={(e) => {
+                            const d = resize.current;
+                            if (
+                              !d ||
+                              d.id !== c.id ||
+                              d.pointer !== e.pointerId
+                            )
+                              return;
+                            e.stopPropagation();
+                            const w = resizedWidth(
+                              d.width,
+                              e.clientX - d.startX,
+                              zoom,
+                              c.kind,
+                            );
+                            setCards((cs) =>
+                              cs.map((card) =>
+                                card.id === d.id
+                                  ? { ...card, display_width: w }
+                                  : card,
+                              ),
+                            );
+                          }}
+                          onPointerUp={(e) => {
+                            const d = resize.current;
+                            if (!d || d.pointer !== e.pointerId) return;
+                            e.stopPropagation();
+                            resize.current = null;
+                            void persistView(
+                              c,
+                              {
+                                display_width: resizedWidth(
+                                  d.width,
+                                  e.clientX - d.startX,
+                                  zoom,
+                                  c.kind,
+                                ),
+                              },
+                              { display_width: d.width },
+                            );
+                          }}
+                          onPointerCancel={(e) => {
+                            const d = resize.current;
+                            if (!d) return;
+                            e.stopPropagation();
+                            resize.current = null;
+                            setCards((cs) =>
+                              cs.map((card) =>
+                                card.id === d.id
+                                  ? { ...card, display_width: d.width }
+                                  : card,
+                              ),
+                            );
+                          }}
+                          onKeyDown={(e) => {
+                            if (!["ArrowLeft", "ArrowRight"].includes(e.key))
+                              return;
+                            e.preventDefault();
+                            void persistView(c, {
+                              display_width: resizedWidth(
+                                cardWidth(c),
+                                e.key === "ArrowRight" ? 20 : -20,
+                                1,
+                                c.kind,
+                              ),
+                            });
+                          }}
+                        >
+                          ◢
+                        </button>
+                      )}
                     </article>
                   ))}
                 </div>
@@ -688,14 +1147,10 @@ export default function EventBoard({ eventId }: { eventId: string }) {
                   void action(async () => {
                     if (!from || !to || from === to)
                       throw Error("请选择两张不同卡片。");
-                    const r = await browserDB()
-                      .from("event_board_edges")
-                      .insert({
-                        event_id: eventId,
-                        user_id: userId,
-                        from_card: from,
-                        to_card: to,
-                      });
+                    const r = await browserDB().rpc("connect_board_cards", {
+                      source_card: from,
+                      target_card: to,
+                    });
                     if (r.error) throw Error("连线未保存，请检查是否已存在。");
                     setFrom("");
                     setTo("");

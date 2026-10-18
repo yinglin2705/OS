@@ -10,7 +10,9 @@
     "typecheck": "tsc --noEmit",
     "test:db": "bash scripts/test-db.sh",
     "deploy:notifications": "node scripts/deploy-notifications.mjs",
-    "test:browser": "node scripts/test-knowledge-browser.cjs"
+    "test:browser": "node scripts/test-knowledge-browser.cjs",
+    "prebuild": "node scripts/prepare-pdf-assets.mjs",
+    "predev": "node scripts/prepare-pdf-assets.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.6.1",
@@ -21,6 +23,7 @@
     "jszip": "^3.10.1",
     "luxon": "^3.7.2",
     "next": "^15.5.12",
+    "pdfjs-dist": "^5.4.296",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "zod": "^3.25.76"

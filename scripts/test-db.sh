@@ -20,6 +20,10 @@ for attempt in 1 2; do
   docker exec -i "$ying_db" psql -U postgres -v ON_ERROR_STOP=1 < supabase/migrations/003_knowledge_workspace.sql
 done
 docker exec -i "$ying_db" psql -U postgres -v ON_ERROR_STOP=1 < tests/knowledge-workspace.sql
+for attempt in 1 2; do
+  docker exec -i "$ying_db" psql -U postgres -v ON_ERROR_STOP=1 < supabase/migrations/004_board_interactions.sql
+done
+docker exec -i "$ying_db" psql -U postgres -v ON_ERROR_STOP=1 < tests/board-interactions.sql
 docker exec -i "$ying_db" psql -U postgres -v ON_ERROR_STOP=1 < tests/cron-before.sql
 for attempt in 1 2; do
   docker exec -i "$ying_db" psql -U postgres -v ON_ERROR_STOP=1 < supabase/cron.sql

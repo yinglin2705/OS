@@ -1331,3 +1331,140 @@ td:last-child {
     flex-direction: column;
   }
 }
+/* Direct manipulation and document annotations */
+.board-canvas {
+  width: 3200px;
+  height: 3200px;
+}
+.board-card {
+  user-select: none;
+}
+.board-card.connection-target {
+  outline: 3px solid #488e78;
+  outline-offset: 6px;
+}
+.board-wires .board-wire-preview {
+  stroke: #368e72;
+  stroke-width: 3;
+  stroke-dasharray: 8 5;
+}
+.board-connect-handle,
+.board-resize {
+  touch-action: none;
+}
+.board-gesture-hint {
+  font-size: 12px;
+  color: var(--muted);
+  margin: 0 0 8px;
+}
+.board-pen-color {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  font-size: 12px;
+}
+.board-pen-color select {
+  padding: 5px;
+}
+.board-resize {
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  padding: 1px 6px;
+  border: 0;
+  background: transparent;
+  color: #738074;
+  cursor: nwse-resize;
+}
+.board-image img {
+  height: auto;
+  max-height: none;
+}
+.board-image .board-photo {
+  width: 100%;
+}
+.annotation-unit {
+  position: relative;
+}
+.annotation-tools {
+  display: flex;
+  gap: 7px;
+  padding: 3px 8px;
+  align-items: center;
+  font-size: 11px;
+}
+.annotation-tools button {
+  padding: 3px 6px;
+  font-size: 11px;
+  background: transparent;
+  color: inherit;
+  border-color: #89917b55;
+}
+.annotation-tools button[aria-pressed="true"] {
+  background: #ffdc6999;
+  color: #3a382b;
+}
+.annotation-surface {
+  position: relative;
+  width: 100%;
+}
+.highlight-overlay {
+  position: absolute;
+  inset: 0;
+  height: 100%;
+  width: 100%;
+  z-index: 2;
+  touch-action: none;
+  cursor: crosshair;
+}
+.highlight-overlay path {
+  fill: none;
+  stroke-width: 28;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0.38;
+  mix-blend-mode: multiply;
+}
+.board-note-surface {
+  min-height: 175px;
+}
+.board-note-surface .board-card-body {
+  max-height: none;
+  overflow: visible;
+}
+.pdf-reader {
+  background: #f0f1ed;
+  color: #333d35;
+}
+.pdf-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 6px;
+  font-size: 12px;
+}
+.pdf-pagination button {
+  padding: 2px 10px;
+}
+.pdf-pagination a {
+  margin-left: auto;
+}
+.pdf-page-container {
+  width: 100%;
+}
+.pdf-page-canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+  background: #fff;
+  min-height: 100px;
+}
+.board-pdf .board-card-content {
+  padding-top: 10px;
+}
+
+.board-pen-color {
+  white-space: nowrap;
+  flex-shrink: 0;
+}

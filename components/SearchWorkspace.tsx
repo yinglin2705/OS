@@ -164,6 +164,28 @@ export default function SearchWorkspace() {
           nodeMarkdown(node, all.nodes, all.edges, attachment),
         );
       }
+      const [ink, layout] = await Promise.all([
+        browserDB()
+          .from("board_highlights")
+          .select("id,event_id,card_id,page,color,points")
+          .limit(1000),
+        browserDB()
+          .from("event_board_cards")
+          .select("id,event_id,x,y,display_width,pdf_page")
+          .limit(1000),
+      ]);
+      if (ink.error || layout.error)
+        throw Error("批注或布局无法读取，本次导出已停止。");
+      if ((ink.data?.length || 0) >= 1000)
+        throw Error("批注量超过本次导出上限，请分批备份；未生成不完整备份。");
+      zip.file(
+        "YING-board-layout-and-highlights.json",
+        JSON.stringify(
+          { version: 1, layout: layout.data, highlights: ink.data },
+          null,
+          2,
+        ),
+      );
       zip.file(
         "README.md",
         "# YING OS 私人资料导出\n\n解压后可作为 Obsidian vault 打开；每条日程和卡片是独立 Markdown 文件。关联使用稳定 ID 的双向链接。附件放在 attachments 文件夹。此文件不会自动同步回 YING OS。\n",

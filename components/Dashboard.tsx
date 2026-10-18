@@ -148,8 +148,8 @@ export default function Dashboard({
     if (user) void refresh();
   }, [user]);
   useEffect(() => {
-    if (timetable.current) timetable.current.scrollTop = 7 * 72;
-  }, [tab, view, user]); // Reload after each controlled mutation.
+    if (timetable.current) timetable.current.scrollTop = 6 * 72;
+  }, [tab, view, user, loading]); // Wait until the authenticated timetable is mounted.
   const visible = useMemo(
     () => events.filter((e) => category === "all" || e.category === category),
     [events, category],

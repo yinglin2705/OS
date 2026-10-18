@@ -84,6 +84,13 @@ describe("controlled classroom note ingestion", () => {
     ).toEqual(["create", "skip"]);
     expect(fingerprint("a  b")).toBe(fingerprint("a\nb"));
   });
+  it("proposes visible wiki links to earlier independent course notes without modifying originals", () => {
+    const p = ruleNotes(text, "C4D")[1];
+    const r = prepareNoteProposals([p], text, [existing], [])[0];
+    expect(r.payload.body).toContain(`[[${existing.title}]]`);
+    expect(r.payload.related_titles).toContain(existing.title);
+    expect(r.action).toBe("create");
+  });
   it("proposes only owner-supplied events matching course and London lesson date", () => {
     const p = ruleNotes(text, "C4D")[0];
     const event = {

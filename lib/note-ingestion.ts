@@ -256,6 +256,37 @@ export function prepareNoteProposals(
         n.title === p.title &&
         n.lesson_date === p.lesson_date,
     );
+    // Suggestions are visible in the editable preview; course continuity is
+    // evidence for a proposed connection, never a claim of semantic identity.
+    const candidates = existing
+      .filter(
+        (n) =>
+          n.course.toLowerCase() === p.course.toLowerCase() &&
+          n.id !== exact?.id &&
+          n.id !== possible[0]?.id &&
+          (p.source_excerpt.includes(n.title) ||
+            (p.lesson_date && n.lesson_date && n.lesson_date < p.lesson_date)),
+      )
+      .sort((a, b) => (b.lesson_date || "").localeCompare(a.lesson_date || ""));
+    const suggested = candidates
+      .slice(0, 2)
+      .map((n) => n.title)
+      .filter(
+        (title) =>
+          existing.filter((n) => n.title.toLowerCase() === title.toLowerCase())
+            .length === 1 && !references(p.body).includes(title),
+      );
+    if (suggested.length) {
+      p.body +=
+        "\n\n## 建议关联笔记（可在预览删除）\n\n" +
+        suggested.map((title) => `- [[${title}]]`).join("\n");
+      p.related_titles = [
+        ...new Set([...p.related_titles, ...suggested]),
+      ].slice(0, 30);
+      warnings.push(
+        "按原文提及或同课程较早课次建议笔记关联；不是已核实的知识关系，可编辑删除。",
+      );
+    }
     const duplicateInFile = seen.has(p.fingerprint);
     seen.add(p.fingerprint);
     const target = exact || (possible.length === 1 ? possible[0] : undefined);

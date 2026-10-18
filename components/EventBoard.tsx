@@ -61,6 +61,7 @@ export default function EventBoard({ eventId }: { eventId: string }) {
     [editing, setEditing] = useState<Card | null>(null);
   const [from, setFrom] = useState(""),
     [to, setTo] = useState("");
+  const [annotationTool, setAnnotationTool] = useState<"pen" | "eraser">("pen");
   const [highlightCard, setHighlightCard] = useState(""),
     [penColor, setPenColor] = useState<HighlightColor>("yellow");
   const [preview, setPreview] = useState<{
@@ -951,6 +952,8 @@ export default function EventBoard({ eventId }: { eventId: string }) {
                           cardId={c.id}
                           active={highlightCard === c.id}
                           color={penColor}
+                          tool={annotationTool}
+                          onToolChange={setAnnotationTool}
                           onToggle={() =>
                             setHighlightCard(highlightCard === c.id ? "" : c.id)
                           }
@@ -965,6 +968,8 @@ export default function EventBoard({ eventId }: { eventId: string }) {
                           page={0}
                           active={highlightCard === c.id}
                           color={penColor}
+                          tool={annotationTool}
+                          onToolChange={setAnnotationTool}
                           onToggle={() =>
                             setHighlightCard(highlightCard === c.id ? "" : c.id)
                           }
@@ -993,6 +998,8 @@ export default function EventBoard({ eventId }: { eventId: string }) {
                           page={0}
                           active={highlightCard === c.id}
                           color={penColor}
+                          tool={annotationTool}
+                          onToolChange={setAnnotationTool}
                           onToggle={() =>
                             setHighlightCard(highlightCard === c.id ? "" : c.id)
                           }

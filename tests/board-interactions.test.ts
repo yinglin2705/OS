@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  erasedStrokeIds,
   normalizedPoint,
   resizedWidth,
   cardWidth,
@@ -72,4 +73,55 @@ describe("direct board manipulation", () => {
     ])
       expect(highlightPoints.safeParse(p).success).toBe(false);
   });
+});
+
+it("sweeps across entire line segments even when fast pointer samples miss the ink", () => {
+  const strokes = [
+    {
+      id: "a",
+      points: [
+        [0.2, 0.5],
+        [0.8, 0.5],
+      ] as [number, number][],
+    },
+    {
+      id: "b",
+      points: [
+        [0.1, 0.1],
+        [0.2, 0.1],
+      ] as [number, number][],
+    },
+  ];
+  expect(
+    erasedStrokeIds(
+      strokes,
+      [
+        [0.5, 0.2],
+        [0.5, 0.8],
+      ],
+      { width: 400, height: 400 },
+    ),
+  ).toEqual(["a"]);
+  expect(
+    erasedStrokeIds(strokes, [[0.9, 0.9]], { width: 400, height: 400 }),
+  ).toEqual([]);
+});
+it("erases dots, excludes disjoint collinear segments and follows scaled surfaces", () => {
+  const strokes = [
+    { id: "dot", points: [[0.4, 0.4]] as [number, number][] },
+    {
+      id: "line",
+      points: [
+        [0.05, 0.4],
+        [0.1, 0.4],
+      ] as [number, number][],
+    },
+  ];
+  expect(
+    erasedStrokeIds(strokes, [[0.4, 0.4]], { width: 800, height: 400 }),
+  ).toEqual(["dot"]);
+  expect(
+    erasedStrokeIds(strokes, [[0.4, 0.4]], { width: 400, height: 200 }),
+  ).toEqual(["dot"]);
+  expect(erasedStrokeIds(strokes, [], { width: 400, height: 200 })).toEqual([]);
 });

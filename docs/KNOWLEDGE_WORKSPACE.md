@@ -45,3 +45,7 @@ JPEG / PNG / WebP / GIF / PDF 单文件上限 8 MB，保存在私有 `event-boar
 - Markdown导出附带 `YING-board-layout-and-highlights.json` 保存布局和笔迹；Obsidian不会自动渲染这些YING专用笔迹，PDF原文件仍是未改写版本。批注达到1000条时会停止本次导出，避免静默丢失内容。
 
 `004_board_interactions.sql` 增加账号隔离的批注表、同看板连线和原子新建RPC，不修改事件、来源或通知Cron。PDF worker在prebuild/predev从锁定的npm依赖复制到忽略的public目录，不依赖第三方PDF上传服务。
+
+### 橡皮擦
+
+卡片批注工具栏「橡皮擦」支持拖过笔迹整笔删除，擦除预览会淡化目标。只删除当前卡片当前页的笔迹，快速划过也能命中线段，不修改文字、图片或PDF原文件。「撤销擦除」恢复本次打开期间最后一次删除的笔迹；翻页/刷新后撤销栈不保留，但已删除结果会持久化。工具模式在PDF翻页间保持。失败会重新读取数据库核对结果，不盲目重试。

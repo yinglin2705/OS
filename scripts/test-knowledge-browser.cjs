@@ -236,15 +236,35 @@ let downloads = 0;
       data = id;
     } else if (u.pathname.endsWith("/rest/v1/board_highlights")) {
       if (method === "POST") {
-        const r = { id: crypto.randomUUID(), ...JSON.parse(req.postData()) };
-        highlights.push(r);
-        data = r;
-      } else if (method === "DELETE") {
-        const i = highlights.findIndex(
-          (h) => h.id === u.searchParams.get("id")?.slice(3),
+        const payload = JSON.parse(req.postData());
+        const rows = (Array.isArray(payload) ? payload : [payload]).map(
+          (r) => ({
+            id: crypto.randomUUID(),
+            created_at: new Date().toISOString(),
+            ...r,
+          }),
         );
-        if (i >= 0) highlights.splice(i, 1);
-        data = null;
+        highlights.push(...rows);
+        data = Array.isArray(payload) ? rows : rows[0];
+      } else if (method === "DELETE") {
+        const filter = u.searchParams.get("id") || "";
+        const ids = filter.startsWith("in.")
+          ? filter.slice(4, -1).split(",")
+          : [filter.slice(3)];
+        const removed = highlights.filter(
+          (h) =>
+            ids.includes(h.id) &&
+            h.card_id === u.searchParams.get("card_id")?.slice(3) &&
+            (!u.searchParams.has("page") ||
+              h.page === Number(u.searchParams.get("page").slice(3))),
+        );
+        for (const r of removed) {
+          highlights.splice(
+            highlights.findIndex((h) => h.id === r.id),
+            1,
+          );
+        }
+        data = removed;
       } else
         data = u.searchParams.has("card_id")
           ? highlights.filter(
@@ -493,6 +513,75 @@ let downloads = 0;
     2,
   );
   assert.equal(cards[1].display_width, 440);
+  async function sweepErase(locator) {
+    const rect = await locator.locator(".highlight-overlay").boundingBox();
+    await page.mouse.move(
+      rect.x + rect.width * 0.5,
+      rect.y + rect.height * 0.15,
+    );
+    await page.mouse.down();
+    await page.mouse.move(
+      rect.x + rect.width * 0.5,
+      rect.y + rect.height * 0.65,
+      { steps: 6 },
+    );
+    await page.mouse.up();
+    await page.waitForFunction(
+      () =>
+        !Array.from(document.querySelectorAll(".annotation-tools")).some((e) =>
+          e.textContent.includes("保存中"),
+        ),
+    );
+  }
+  const eraseNote = page.locator(".board-note").first(),
+    erasePDF = page.locator(".board-pdf");
+  const strokeTotal = highlights.length;
+  const noteId = cards[0].id;
+  await eraseNote.getByRole("button", { name: "橡皮擦", exact: true }).click();
+  await sweepErase(eraseNote);
+  assert.equal(highlights.filter((h) => h.card_id === noteId).length, 0);
+  assert.equal(highlights.length, strokeTotal - 1);
+  await eraseNote
+    .getByRole("button", { name: "撤销擦除", exact: true })
+    .click();
+  await page.waitForFunction(
+    () =>
+      !Array.from(document.querySelectorAll(".annotation-tools")).some((e) =>
+        e.textContent.includes("保存中"),
+      ),
+  );
+  assert.equal(highlights.filter((h) => h.card_id === noteId).length, 1);
+  await erasePDF.getByRole("button", { name: "橡皮擦", exact: true }).click();
+  await sweepErase(erasePDF);
+  const pdfId = cards.find((c) => c.kind === "pdf").id;
+  assert.equal(
+    highlights.filter((h) => h.card_id === pdfId && h.page === 1).length,
+    0,
+  );
+  assert.equal(
+    highlights.filter((h) => h.card_id === pdfId && h.page === 2).length,
+    1,
+  );
+  await page.getByRole("button", { name: "PDF 下一页", exact: true }).click();
+  await page.getByText("2 / 2", { exact: true }).waitFor();
+  await erasePDF
+    .getByRole("button", { name: "退出橡皮擦", exact: true })
+    .waitFor();
+  await erasePDF
+    .locator(".highlight-overlay path")
+    .waitFor({ state: "attached" });
+  await page.getByRole("button", { name: "PDF 上一页", exact: true }).click();
+  await page.getByText("1 / 2", { exact: true }).waitFor();
+  await page.reload();
+  await page.getByText("1 / 2", { exact: true }).waitFor();
+  await page.waitForFunction(
+    () =>
+      !document.querySelector(".board-pdf .annotation-tools button")?.disabled,
+  );
+  assert.equal(
+    await page.locator(".board-pdf .highlight-overlay path").count(),
+    0,
+  );
   await page.getByRole("button", { name: "适应内容", exact: true }).click();
   await page.waitForTimeout(100);
   await page.screenshot({ path: "/tmp/ying-board-desktop.png" });
@@ -540,6 +629,10 @@ let downloads = 0;
       highlight_page_isolation: true,
       highlight_reload: true,
       aspect_resize: true,
+      eraser_hits_and_undo: true,
+      eraser_page_isolation: true,
+      eraser_tool_persists_across_pages: true,
+      erasure_persists_on_reload: true,
       pdf_upload: true,
       mobile_layout: true,
       cross_query_link: true,

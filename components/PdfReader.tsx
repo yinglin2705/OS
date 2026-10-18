@@ -11,6 +11,8 @@ export default function PdfReader({
   cardId,
   active,
   color,
+  tool,
+  onToolChange,
   onToggle,
   onError,
   disabled,
@@ -22,6 +24,8 @@ export default function PdfReader({
   cardId: string;
   active: boolean;
   color: HighlightColor;
+  tool: "pen" | "eraser";
+  onToolChange: (t: "pen" | "eraser") => void;
   onToggle: () => void;
   onError: (s: string) => void;
   disabled: boolean;
@@ -147,6 +151,9 @@ export default function PdfReader({
           page={visiblePage}
           active={active && !rendering && !!doc}
           color={color}
+          tool={tool}
+          onToolChange={onToolChange}
+          disabled={!doc || rendering}
           onToggle={onToggle}
           onError={onError}
         >

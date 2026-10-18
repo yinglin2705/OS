@@ -1468,3 +1468,18 @@ td:last-child {
   white-space: nowrap;
   flex-shrink: 0;
 }
+.annotation-tools {
+  flex-wrap: wrap;
+}
+.highlight-overlay.eraser-mode {
+  cursor: cell;
+}
+.highlight-overlay path.erase-preview {
+  opacity: 0.1;
+}
+.eraser-cursor {
+  fill: #ffffff55;
+  stroke: #675c50;
+  stroke-width: 1;
+  pointer-events: none;
+}

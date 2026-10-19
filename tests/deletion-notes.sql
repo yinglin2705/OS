@@ -24,8 +24,9 @@ end $$;
 reset role;
 insert into public.note_import_batches(id,course,source_text,source_label,engine,source_hash) values('40000000-0000-4000-8000-000000000043','C4D','rollback fixture','fixture','rules','rollback');
 insert into public.note_import_proposals(batch_id,action,payload) values
-('40000000-0000-4000-8000-000000000043','create','{"title":"Must roll back","course":"C4D","body":"fixture"}'),
+('40000000-0000-4000-8000-000000000043','create','{"title":"Must roll back","course":"C4D","body":"fixture","tags":[],"event_ids":[],"related_titles":[],"source_excerpt":"rollback fixture","fingerprint":"rollback"}'),
 ('40000000-0000-4000-8000-000000000043','review','{"title":"Unresolved","course":"C4D","body":"fixture"}');
+update public.note_import_proposals set created_at=created_at+interval '1 second' where batch_id='40000000-0000-4000-8000-000000000043' and action='review';
 set local role authenticated;
 do $$ begin
  begin perform public.confirm_note_batch('40000000-0000-4000-8000-000000000043');raise exception 'Review unexpectedly committed';exception when raise_exception then if SQLERRM='Review unexpectedly committed' then raise;end if;end;

@@ -431,6 +431,9 @@ export default function Dashboard({
               )}
             </button>
           ))}
+          <a className="nav-search" href="/career">
+            ↗ Career Agent
+          </a>
           <a className="nav-search" href="/notes">
             ▤ 课程笔记
           </a>

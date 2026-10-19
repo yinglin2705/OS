@@ -30,6 +30,10 @@ for migration in 005_deletion_controls 006_course_notes; do
   done
 done
 docker exec -i "$ying_db" psql -U postgres -v ON_ERROR_STOP=1 < tests/deletion-notes.sql
+for attempt in 1 2; do
+  docker exec -i "$ying_db" psql -U postgres -v ON_ERROR_STOP=1 < supabase/migrations/007_career_agent.sql
+done
+docker exec -i "$ying_db" psql -U postgres -v ON_ERROR_STOP=1 < tests/career-db.sql
 docker exec -i "$ying_db" psql -U postgres -v ON_ERROR_STOP=1 < tests/cron-before.sql
 for attempt in 1 2; do
   docker exec -i "$ying_db" psql -U postgres -v ON_ERROR_STOP=1 < supabase/cron.sql

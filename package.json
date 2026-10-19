@@ -12,7 +12,10 @@
     "deploy:notifications": "node scripts/deploy-notifications.mjs",
     "test:browser": "node scripts/test-knowledge-browser.cjs",
     "prebuild": "node scripts/prepare-pdf-assets.mjs",
-    "predev": "node scripts/prepare-pdf-assets.mjs"
+    "predev": "node scripts/prepare-pdf-assets.mjs",
+    "career:discover": "node --experimental-strip-types scripts/discover-career.ts",
+    "deploy:career": "node scripts/deploy-career.mjs",
+    "test:career:browser": "node scripts/test-career-browser.cjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.6.1",

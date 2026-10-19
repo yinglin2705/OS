@@ -149,3 +149,9 @@ SQL Editor 管理员执行时没有用户会话，需使用你本人 user_id 过
 `/trash` 恢复/永久删除日程和笔记，`/manage` 清理来源、历史、任务、导入与高级账号删除。附件删除失败保留清理队列；清理通知日志保留最小去重哈希以避免重复发送。
 
 操作步骤、删除边界、AuDHD 与 Obsidian / Notion / Figma 对标、未实现功能见 [功能审查](docs/PRODUCT_REVIEW.md)。`npm test`、`npm run test:db`，本地生产服务器运行后可用 `YING_BROWSER_BASE_URL=http://localhost:3090 node scripts/test-notes-browser.cjs` 验证隔离笔记界面。
+
+## Career Agent
+
+`/career` adds a private, source-backed Master Career Profile, London creative-role shortlist, JD analysis, transparent evidence coverage, employer AI-policy gating, evidence-template CV/cover letter/personal statement versions and manually recorded application progress. It never submits applications or sends emails. No personal experience or qualifications are seeded or invented.
+
+Migration007 and `deploy-career.yml` reuse the existing Supabase/GitHub deployment convention. `career-discovery.yml` performs daily read-only discovery from explicitly approved official Greenhouse feeds; no arbitrary scraping or outbound profile sharing. Model-based matching, polished generative writing and broad web search remain unimplemented. See [Career Agent architecture, operation and deployment](docs/CAREER_AGENT.md) for approval boundaries, testing and live-verification requirements.

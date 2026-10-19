@@ -155,3 +155,9 @@ SQL Editor 管理员执行时没有用户会话，需使用你本人 user_id 过
 `/career` adds a private, source-backed Master Career Profile, London creative-role shortlist, JD analysis, transparent evidence coverage, employer AI-policy gating, evidence-template CV/cover letter/personal statement versions and manually recorded application progress. It never submits applications or sends emails. No personal experience or qualifications are seeded or invented.
 
 Migration007 and `deploy-career.yml` reuse the existing Supabase/GitHub deployment convention. `career-discovery.yml` performs daily read-only discovery from explicitly approved official Greenhouse feeds; no arbitrary scraping or outbound profile sharing. Model-based matching, polished generative writing and broad web search remain unimplemented. See [Career Agent architecture, operation and deployment](docs/CAREER_AGENT.md) for approval boundaries, testing and live-verification requirements.
+
+## 日历确认与状态修改
+
+确认提议后会回读对应日程：单条定位到实际日期，批量进入列表；“今日安排”仅统计当天，日历上方另外显示已保存总数。可用“搜索行程”查找名称，或“全部已保存”清除筛选。没有开始时间的记录保留在“待补时间 / 仅截止事项”和列表中，不补造时刻。
+
+活动详情顶部的“行程状态”直接保存，无需经过收件箱；`008_event_status.sql` 的受保护RPC核对本人、活动版本及未删除状态，保留来源和历史。`deploy-event-status.yml` 自动部署该新增函数，不修改任何已有日程数据。浏览器隔离回归：运行本地生产服务器后执行 `YING_BROWSER_BASE_URL=http://localhost:3112 node scripts/test-calendar-confirmation-browser.cjs`。

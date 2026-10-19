@@ -1775,3 +1775,27 @@ td:last-child {
     flex-wrap: wrap;
   }
 }
+
+.calendar-save-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin: 12px 0;
+  color: var(--muted);
+}
+.calendar-unscheduled {
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  margin: 12px 0;
+}
+.calendar-unscheduled .event-card {
+  margin: 8px 0;
+}
+.event-status-control {
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  margin: 12px 0;
+}

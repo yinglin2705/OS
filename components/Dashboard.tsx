@@ -68,6 +68,8 @@ export default function Dashboard({
 }) {
   const timetable = useRef<HTMLDivElement>(null);
   const approvalInFlight = useRef(false);
+  const [statusFeedback, setStatusFeedback] = useState("");
+  const [syncWarning, setSyncWarning] = useState("");
   const [approvalProgress, setApprovalProgress] = useState("");
   const [ready, setReady] = useState(false),
     [user, setUser] = useState<string | null>(null),
@@ -79,6 +81,7 @@ export default function Dashboard({
     [proposals, setProposals] = useState<Proposal[]>([]),
     [tasks, setTasks] = useState<Task[]>([]),
     [history, setHistory] = useState<History[]>([]);
+  const [eventQuery, setEventQuery] = useState("");
   const [showCompletedTasks, setShowCompletedTasks] = useState(false);
   const openedEvent = useRef("");
   const [zone, setZone] = useState("Europe/London"),
@@ -139,20 +142,90 @@ export default function Dashboard({
         .limit(100),
       db.from("users").select("timezone").single(),
     ]);
-    const error = result.find((r) => r.error)?.error;
-    if (error) {
-      setMessage("数据读取失败：" + error.message);
-      return;
+    if (result[0].error) {
+      setSyncWarning("日历读取失败，当前画面可能未更新；请点刷新重试。");
+      return null;
     }
-    setEvents(result[0].data || []);
-    setProposals(result[1].data || []);
-    setTasks(result[2].data || []);
-    setHistory(result[3].data || []);
-    if (result[4].data?.timezone) {
+    const rows = (result[0].data || []) as Event[];
+    setEvents(rows);
+    setSelected((current) =>
+      current ? rows.find((e) => e.id === current.id) || null : null,
+    );
+    if (!result[1].error) setProposals(result[1].data || []);
+    if (!result[2].error) setTasks(result[2].data || []);
+    if (!result[3].error) setHistory(result[3].data || []);
+    if (!result[4].error && result[4].data?.timezone) {
       setZone(result[4].data.timezone);
       setAnchor((a) => a.setZone(result[4].data!.timezone));
     }
+    setSyncWarning(
+      result.slice(1).some((r) => r.error)
+        ? "日历已读取，但收件箱、准备任务、历史或设置有部分读取失败；可点刷新重试。"
+        : "",
+    );
+    return rows;
   }
+  function revealEvent(event: Event) {
+    setCategory("all");
+    setEventQuery("");
+    setTab("calendar");
+    const date = event.start_at || event.deadline_at;
+    if (date) setAnchor(dt(date, zone).startOf("day"));
+    setView(event.start_at ? "week" : "agenda");
+    setSelected(event);
+  }
+  async function verifySaved(ids: string[]) {
+    const { data, error } = await browserDB()
+      .from("events")
+      .select("*,event_sources(*)")
+      .in("id", ids)
+      .is("deleted_at", null);
+    if (error || !data || data.length !== new Set(ids).size) {
+      setMessage(
+        "确认请求已提交，但无法回读全部日程；请刷新核对，不要重复新建活动。",
+      );
+      return false;
+    }
+    const saved = data as Event[];
+    setEvents((current) => [
+      ...current.filter((e) => !ids.includes(e.id)),
+      ...saved,
+    ]);
+    setCategory("all");
+    setEventQuery("");
+    setTab("calendar");
+    if (saved.length === 1) revealEvent(saved[0]);
+    else setView("agenda");
+    return true;
+  }
+  async function changeStatus(event: Event, status: Event["status"]) {
+    if (busy || status === event.status) return;
+    setBusy(true);
+    setStatusFeedback("正在保存状态…");
+    try {
+      const { error } = await browserDB().rpc("set_event_status", {
+        target: event.id,
+        expected_version: event.version,
+        new_status: status,
+      });
+      if (error) {
+        setStatusFeedback("保存失败，请刷新核对后重试。");
+        setMessage("状态保存失败，活动可能已变化；请刷新核对后重试。");
+        return;
+      }
+      await refresh();
+      if (await verifySaved([event.id])) {
+        setMessage("状态已保存并回读核对，原来源和修改历史保留。");
+        setStatusFeedback("已保存 · 原来源与历史保留");
+      } else setStatusFeedback("结果尚未回读确认，请刷新核对。");
+    } catch {
+      setStatusFeedback("网络中断，请刷新核对保存结果。");
+      setMessage("状态请求结果尚未确认，请刷新核对，不要重复操作。");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   useEffect(() => {
     if (user) void refresh();
   }, [user]);
@@ -173,9 +246,19 @@ export default function Dashboard({
       setTab("calendar");
     }
   }, [events, zone]);
+  useEffect(() => {
+    setStatusFeedback("");
+  }, [selected?.id]);
   const visible = useMemo(
-    () => events.filter((e) => category === "all" || e.category === category),
-    [events, category],
+    () =>
+      events.filter(
+        (e) =>
+          (category === "all" || e.category === category) &&
+          (e.title + " " + (e.course || "") + " " + (e.location || ""))
+            .toLowerCase()
+            .includes(eventQuery.trim().toLowerCase()),
+      ),
+    [events, category, eventQuery],
   );
   const issues = useMemo(() => conflicts(events), [events]);
   const today = DateTime.now().setZone(zone);
@@ -217,26 +300,27 @@ export default function Dashboard({
     approvalInFlight.current = true;
     setBusy(true);
     try {
-      const { error } = await browserDB().rpc("confirm_proposal", {
+      const { data, error } = await browserDB().rpc("confirm_proposal", {
         proposal_id: id,
         accept,
       });
-      setMessage(
-        error
-          ? "确认失败：" + error.message
-          : accept
-            ? "已更新日历，保留原来源与修改历史"
-            : "已忽略提议",
-      );
+      if (error) {
+        setMessage("确认失败：" + error.message);
+        return;
+      }
+      await refresh();
+      if (!accept) setMessage("已忽略提议");
+      else if (typeof data === "string" && (await verifySaved([data])))
+        setMessage(
+          "日程已保存并回读核对，已定位到对应日期；确认更改不等于已预约。",
+        );
+      else if (typeof data !== "string")
+        setMessage("确认请求已提交，但返回结果不完整；请刷新核对。");
     } catch {
       setMessage("网络中断，请刷新核对结果后再操作");
     } finally {
-      try {
-        await refresh();
-      } finally {
-        approvalInFlight.current = false;
-        setBusy(false);
-      }
+      approvalInFlight.current = false;
+      setBusy(false);
     }
   }
   async function approveAll() {
@@ -253,12 +337,13 @@ export default function Dashboard({
     approvalInFlight.current = true;
     setBusy(true);
     let completed = 0;
+    const savedIds: string[] = [];
     let stopped = false;
     try {
       const db = browserDB();
       for (const proposal of snapshot) {
         setApprovalProgress(`正在确认 ${completed + 1} / ${snapshot.length}…`);
-        const { error } = await db.rpc("confirm_proposal", {
+        const { data, error } = await db.rpc("confirm_proposal", {
           proposal_id: proposal.id,
           accept: true,
         });
@@ -267,6 +352,7 @@ export default function Dashboard({
           break;
         }
         completed++;
+        if (typeof data === "string") savedIds.push(data);
       }
       setMessage(
         stopped
@@ -280,6 +366,7 @@ export default function Dashboard({
     } finally {
       try {
         await refresh();
+        if (savedIds.length) await verifySaved([...new Set(savedIds)]);
       } finally {
         setApprovalProgress("");
         approvalInFlight.current = false;
@@ -493,6 +580,14 @@ export default function Dashboard({
             </button>
           </div>
         )}
+        {syncWarning && (
+          <div className="notice" role="alert">
+            {syncWarning}
+            <button disabled={busy} onClick={() => void refresh()}>
+              刷新日程
+            </button>
+          </div>
+        )}
         {tab === "calendar" && (
           <>
             <div className="summary">
@@ -598,6 +693,34 @@ export default function Dashboard({
                   ))}
                 </div>
               </div>
+              <div className="calendar-save-summary">
+                <span>
+                  已保存日程 {events.length} 条 · 当前筛选 {visible.length} 条 ·
+                  “今日安排”只统计今天
+                </span>
+                <button disabled={busy} onClick={() => void refresh()}>
+                  刷新日程
+                </button>
+                <button
+                  onClick={() => {
+                    setCategory("all");
+                    setEventQuery("");
+                    setView("agenda");
+                  }}
+                >
+                  全部已保存
+                </button>
+              </div>
+              <input
+                type="search"
+                aria-label="搜索行程"
+                placeholder="搜索活动名称，例如 robotic…"
+                value={eventQuery}
+                onChange={(e) => {
+                  setEventQuery(e.target.value);
+                  if (e.target.value.trim()) setView("agenda");
+                }}
+              />
               <div className="filters">
                 <button
                   className={category === "all" ? "chosen" : ""}
@@ -617,6 +740,40 @@ export default function Dashboard({
                 ))}
                 <button onClick={exportICS}>导出 ICS</button>
               </div>
+              {view !== "agenda" && visible.some((e) => !e.start_at) && (
+                <details className="calendar-unscheduled">
+                  <summary>
+                    待补时间 / 仅截止事项 ·{" "}
+                    {visible.filter((e) => !e.start_at).length}{" "}
+                    条（已保存，不占用课表时段）
+                  </summary>
+                  {visible
+                    .filter((e) => !e.start_at)
+                    .map((e) => (
+                      <div key={e.id}>
+                        {e.deadline_at && (
+                          <p>
+                            截止：
+                            {dt(e.deadline_at, zone).toFormat(
+                              "yyyy-MM-dd HH:mm",
+                            )}
+                          </p>
+                        )}
+                        {card(e)}
+                      </div>
+                    ))}
+                </details>
+              )}
+              {(view === "week" || view === "day") &&
+                visible.length > 0 &&
+                !days.some(
+                  (day) =>
+                    layoutDay(visible, day.toISODate()!, zone).length > 0,
+                ) && (
+                  <p className="notice">
+                    当前日期范围没有明确开始时间的活动。可切换日期，或点“全部已保存”查看其他日期与待补时间的记录。
+                  </p>
+                )}
               {(view === "week" || view === "day") && (
                 <div
                   ref={timetable}
@@ -1033,7 +1190,13 @@ export default function Dashboard({
           </section>
         )}
         {tab === "settings" && (
-          <Settings userId={user} onMessage={setMessage} onRefresh={refresh} />
+          <Settings
+            userId={user}
+            onMessage={setMessage}
+            onRefresh={async () => {
+              await refresh();
+            }}
+          />
         )}
       </main>
       {selected && (
@@ -1056,6 +1219,28 @@ export default function Dashboard({
               {categories[selected.category]} · {statusLabels[selected.status]}
             </p>
             <h2>{selected.title}</h2>
+            <label className="event-status-control">
+              行程状态（更改后立即保存）
+              <select
+                aria-label="行程状态"
+                disabled={busy}
+                value={selected.status}
+                onChange={(e) =>
+                  void changeStatus(selected, e.target.value as Event["status"])
+                }
+              >
+                {Object.entries(statusLabels).map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {statusFeedback && (
+              <p role="status" aria-live="polite">
+                {statusFeedback}
+              </p>
+            )}
             <a
               className="primary board-open"
               href={`/events/${selected.id}/board`}

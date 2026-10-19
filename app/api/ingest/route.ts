@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { serverDB, adminDB, sameOrigin } from "@/lib/server";
+import { serverDB, sameOrigin } from "@/lib/server";
 import { fileRecords, MAX_BYTES } from "@/lib/file-import";
 import { DateTime } from "luxon";
 import {
@@ -13,27 +13,11 @@ export const runtime = "nodejs";
 export async function POST(req: Request) {
   if (!sameOrigin(req))
     return NextResponse.json({ error: "来源验证失败" }, { status: 403 });
-  if (!process.env.SUPABASE_SERVICE_ROLE_KEY)
-    return NextResponse.json(
-      { error: "Supabase 服务端尚未配置" },
-      { status: 503 },
-    );
   const session = await serverDB();
   const {
     data: { user },
   } = await session.auth.getUser();
   if (!user) return NextResponse.json({ error: "请先登录" }, { status: 401 });
-  const admin = adminDB();
-  const { count } = await admin
-    .from("ingestion_batches")
-    .select("*", { count: "exact", head: true })
-    .eq("user_id", user.id)
-    .gt("created_at", new Date(Date.now() - 60000).toISOString());
-  if ((count || 0) >= 10)
-    return NextResponse.json(
-      { error: "导入请求过多，请稍后重试" },
-      { status: 429 },
-    );
   const [{ data: events, error: eventError }, { data: settings }] =
     await Promise.all([
       session.from("events").select("*").is("deleted_at", null),
@@ -147,21 +131,23 @@ export async function POST(req: Request) {
       } else throw new Error("请输入消息或事件");
     }
     if (!proposals.length) throw new Error("没有可导入的记录");
-    const { data: batch, error: bError } = await admin
-      .from("ingestion_batches")
-      .insert({ user_id: user.id, source_type: sourceType, filename })
-      .select("id")
-      .single();
-    if (bError) throw new Error("无法保存导入批次");
-    const { error } = await admin
-      .from("change_proposals")
-      .insert(
-        proposals.map((p) => ({ ...p, user_id: user.id, batch_id: batch.id })),
+    const records = proposals.map((p) => ({
+      ...p,
+      payload: eventInput.innerType().partial().parse(p.payload),
+    }));
+    const { data, error } = await session.rpc("ingest_calendar_records", {
+      records,
+      batch_source_type: sourceType,
+      batch_filename: filename || null,
+    });
+    if (error)
+      throw Error(
+        "没有写入任何日程：请检查重复修改、记录字段或活动版本；刷新后再试。",
       );
-    if (error) throw new Error("无法保存提议");
     return NextResponse.json({
-      count: proposals.length,
-      message: "已加入 AI 收件箱，确认前不会修改日历",
+      count: records.length,
+      event_ids: data,
+      message: `已将${records.length}条记录直接写入日历，来源与历史保留。`,
     });
   } catch (e) {
     return NextResponse.json(

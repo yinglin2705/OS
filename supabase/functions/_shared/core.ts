@@ -20,6 +20,7 @@ export type CalendarEvent = {
 };
 export const statusLabels: Record<string, string> = {
   confirmed: "已确认",
+  conflict: "冲突",
   booked: "已预约",
   applied: "已申请",
   planned: "计划中",

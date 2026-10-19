@@ -146,6 +146,16 @@ if (!["localhost", "127.0.0.1"].includes(new URL(base).hostname))
       return route.fulfill({ json: { timezone: "Europe/London" } });
     throw Error("Unexpected fixture endpoint");
   });
+  let directWrites = 0;
+  await context.route(`${base}/api/ingest`, async (route) => {
+    const body = route.request().postDataJSON();
+    directWrites++;
+    const id = "20000000-0000-4000-8000-000000000083";
+    events.push({ ...body.event, id, version: 1, event_sources: [] });
+    return route.fulfill({
+      json: { count: 1, event_ids: [id], message: "已直接写入日历" },
+    });
+  });
   const page = await context.newPage();
   page.setDefaultTimeout(12000);
   page.on("pageerror", (e) => errors.push(e.message));
@@ -167,12 +177,22 @@ if (!["localhost", "127.0.0.1"].includes(new URL(base).hostname))
     .getByRole("heading", { name: "Robotic fixture", exact: true })
     .waitFor();
   await page.getByText("2031-04-07 14:00", { exact: true }).waitFor();
-  await page.getByLabel("行程状态", { exact: true }).selectOption("booked");
+  await page
+    .getByRole("group", { name: "行程状态", exact: true })
+    .getByRole("button", { name: "确认", exact: true })
+    .click();
   await page
     .getByRole("dialog", { name: "活动详情" })
     .getByText("已保存 · 原来源与历史保留", { exact: true })
     .waitFor();
-  assert.equal(events.find((e) => e.id === eid).status, "booked");
+  assert.equal(events.find((e) => e.id === eid).status, "confirmed");
+  assert.equal(
+    await page
+      .getByRole("group", { name: "行程状态", exact: true })
+      .getByRole("button")
+      .count(),
+    4,
+  );
   await page.getByRole("button", { name: "关闭", exact: true }).click();
   await page
     .locator(".day-hours")
@@ -189,12 +209,33 @@ if (!["localhost", "127.0.0.1"].includes(new URL(base).hostname))
     .locator(".agenda")
     .getByRole("button", { name: /Robotic fixture/ })
     .click();
+  await page.getByRole("button", { name: "关闭", exact: true }).click();
+  await page.getByRole("button", { name: /新建活动/ }).click();
+  await page
+    .getByRole("dialog", { name: "编辑活动" })
+    .getByLabel("活动名称", { exact: true })
+    .fill("Direct write fixture");
+  await page.getByRole("button", { name: "保存到日历", exact: true }).click();
+  await page
+    .getByRole("heading", { name: "Direct write fixture", exact: true })
+    .waitFor();
+  assert.equal(directWrites, 1);
+  assert.equal(proposals.length, 0);
+  await page.getByRole("button", { name: "关闭", exact: true }).click();
+  await page.getByRole("button", { name: "全部已保存", exact: true }).click();
+  await page
+    .locator(".agenda")
+    .getByRole("button", { name: /Robotic fixture/ })
+    .click();
   failReadback = true;
-  await page.getByLabel("行程状态", { exact: true }).selectOption("completed");
+  await page
+    .getByRole("group", { name: "行程状态", exact: true })
+    .getByRole("button", { name: "取消", exact: true })
+    .click();
   await page
     .getByText("结果尚未回读确认，请刷新核对。", { exact: true })
     .waitFor();
-  assert.equal(events.find((e) => e.id === eid).status, "completed");
+  assert.equal(events.find((e) => e.id === eid).status, "cancelled");
   assert.deepEqual(errors, []);
   console.log(
     JSON.stringify({

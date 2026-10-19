@@ -17,6 +17,7 @@ export const eventInput = z
     status: z
       .enum([
         "confirmed",
+        "conflict",
         "booked",
         "applied",
         "planned",
@@ -113,6 +114,10 @@ export function rowProposal(
   const rawStatus = String(get("status") || "");
   const statusMap: Record<string, string> = {
     已确认: "confirmed",
+    确认: "confirmed",
+    冲突: "conflict",
+    待定: "planned",
+    取消: "cancelled",
     已预约: "booked",
     已申请: "applied",
     待考虑: "considering",
@@ -125,6 +130,7 @@ export function rowProposal(
   if (
     ![
       "confirmed",
+      "conflict",
       "booked",
       "applied",
       "planned",
@@ -247,6 +253,7 @@ export function naturalProposal(
   });
   let status: string | undefined;
   if (/取消/.test(text)) status = "cancelled";
+  else if (/标记.{0,4}冲突|状态.{0,4}冲突/.test(text)) status = "conflict";
   else if (/预约成功|已经预约|已预约/.test(text)) status = "booked";
   else if (/已确认|确认参加/.test(text)) status = "confirmed";
   else if (/报名|申请|first choice|第一志愿|首选/.test(text))

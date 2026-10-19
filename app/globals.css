@@ -1799,3 +1799,8 @@ td:last-child {
   border-radius: 8px;
   margin: 12px 0;
 }
+.event-status-control button[aria-pressed="true"] {
+  background: var(--accent);
+  color: var(--bg);
+  border-color: var(--accent);
+}

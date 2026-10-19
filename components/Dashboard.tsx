@@ -5,10 +5,14 @@ import { browserDB, configured } from "@/lib/supabase";
 import {
   conflicts,
   layoutDay,
-  statusLabels,
   type CalendarEvent,
 } from "@/supabase/functions/_shared/core";
 import Settings from "./Settings";
+import {
+  calendarStatuses,
+  calendarStatus,
+  calendarStatusLabels as statusLabels,
+} from "@/lib/calendar-status";
 import { deleteOwned } from "@/lib/deletion-client";
 type Event = Omit<CalendarEvent, "event_sources"> & {
   version: number;
@@ -199,7 +203,7 @@ export default function Dashboard({
     return true;
   }
   async function changeStatus(event: Event, status: Event["status"]) {
-    if (busy || status === event.status) return;
+    if (busy || calendarStatus(status) === calendarStatus(event.status)) return;
     setBusy(true);
     setStatusFeedback("正在保存状态…");
     try {
@@ -285,7 +289,14 @@ export default function Dashboard({
       setMessage(data.error || data.message);
       if (res.ok) {
         await refresh();
-        setTab("inbox");
+        if (Array.isArray(data.event_ids) && data.event_ids.length)
+          await verifySaved(data.event_ids);
+        else {
+          setCategory("all");
+          setEventQuery("");
+          setView("agenda");
+          setTab("calendar");
+        }
         setEdit(null);
         setText("");
       }
@@ -702,6 +713,37 @@ export default function Dashboard({
                   刷新日程
                 </button>
                 <button
+                  disabled={busy}
+                  onClick={async () => {
+                    if (
+                      !window.confirm(
+                        "把本人当前未删除的全部日程改为确认？原状态与来源历史保留，回收站不动。",
+                      )
+                    )
+                      return;
+                    setBusy(true);
+                    try {
+                      const { data, error } = await browserDB().rpc(
+                        "confirm_all_calendar_events",
+                      );
+                      if (error) {
+                        setMessage("批量修改失败，请刷新核对。");
+                        return;
+                      }
+                      await refresh();
+                      setMessage(
+                        `已将${data}条日程改为确认，原状态保留在历史中。`,
+                      );
+                    } catch {
+                      setMessage("请求结果尚未确认，请刷新核对。");
+                    } finally {
+                      setBusy(false);
+                    }
+                  }}
+                >
+                  全部设为确认
+                </button>
+                <button
                   onClick={() => {
                     setCategory("all");
                     setEventQuery("");
@@ -957,7 +999,7 @@ export default function Dashboard({
               <h2>把新信息交给日历</h2>
               <p className="muted">
                 支持粘贴对话、CSV、Excel、ICS（含 Google Calendar 导出）及
-                ChatGPT JSON 导出。可逐条审核，也可全部确认；原始状态保持不变。
+                ChatGPT JSON 导出。导入后直接写入日历；未知时间仍保留为未知。
               </p>
               <form
                 onSubmit={(e) => {
@@ -973,7 +1015,7 @@ export default function Dashboard({
                   required
                 />
                 <button className="primary" disabled={busy}>
-                  生成修改提议
+                  直接写入日历
                 </button>
               </form>
               <label className="file-upload">
@@ -997,7 +1039,7 @@ export default function Dashboard({
                 当前使用可解释的规则解析；不完整日期、重复课程和无法唯一匹配的消息需要人工核实。
               </p>
             </section>
-            <h2>等待你确认 · {proposals.length}</h2>
+            <h2>旧版待处理记录 · {proposals.length}</h2>
             {proposals.length > 0 && (
               <section className="panel">
                 <button
@@ -1086,7 +1128,7 @@ export default function Dashboard({
               </section>
             ))}
             {!proposals.length && (
-              <Empty text="收件箱已清空。导入不会自动改变已确认日程。" />
+              <Empty text="没有旧版待处理记录。新建和导入会直接写入日历。" />
             )}
           </>
         )}
@@ -1219,23 +1261,25 @@ export default function Dashboard({
               {categories[selected.category]} · {statusLabels[selected.status]}
             </p>
             <h2>{selected.title}</h2>
-            <label className="event-status-control">
-              行程状态（更改后立即保存）
-              <select
-                aria-label="行程状态"
-                disabled={busy}
-                value={selected.status}
-                onChange={(e) =>
-                  void changeStatus(selected, e.target.value as Event["status"])
-                }
-              >
-                {Object.entries(statusLabels).map(([value, label]) => (
-                  <option key={value} value={value}>
+            <div
+              className="event-status-control"
+              role="group"
+              aria-label="行程状态"
+            >
+              <p>行程状态 · 点击立即保存</p>
+              <div className="actions">
+                {Object.entries(calendarStatuses).map(([value, label]) => (
+                  <button
+                    key={value}
+                    disabled={busy}
+                    aria-pressed={calendarStatus(selected.status) === value}
+                    onClick={() => void changeStatus(selected, value)}
+                  >
                     {label}
-                  </option>
+                  </button>
                 ))}
-              </select>
-            </label>
+              </div>
+            </div>
             {statusFeedback && (
               <p role="status" aria-live="polite">
                 {statusFeedback}
@@ -1422,7 +1466,7 @@ function EventEditor({
         </button>
         <h2>{event ? "编辑活动" : "新建活动"}</h2>
         <p className="muted">
-          时间使用 {zone}。保存后仍须在收件箱确认；缺失信息不会自动补全。
+          时间使用 {zone}。保存后直接写入日历；缺失信息不会自动补全。
         </p>
         <form
           onSubmit={async (e) => {
@@ -1499,9 +1543,9 @@ function EventEditor({
               状态
               <select
                 name="status"
-                defaultValue={event?.status || "considering"}
+                defaultValue={calendarStatus(event?.status || "planned")}
               >
-                {Object.entries(statusLabels).map(([v, l]) => (
+                {Object.entries(calendarStatuses).map(([v, l]) => (
                   <option value={v} key={v}>
                     {l}
                   </option>
@@ -1575,7 +1619,7 @@ function EventEditor({
             />
           </label>
           <button className="primary" disabled={busy}>
-            保存为待确认更改
+            保存到日历
           </button>
         </form>
       </section>

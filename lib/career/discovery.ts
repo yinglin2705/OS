@@ -1,10 +1,12 @@
 import { analyseJD, phraseIn } from "./engine.ts";
 export const API_HOST = "boards-api.greenhouse.io";
 export const AGENT = "YINGOSCareer/1.0";
-export function boardURL(token: string) {
+export function boardURL(token: string, provider: "greenhouse" | "lever" = "greenhouse") {
   if (!/^[a-zA-Z0-9_-]{1,80}$/.test(token))
     throw Error("Invalid board identifier");
-  return `https://${API_HOST}/v1/boards/${token}/jobs?content=true`;
+  return provider === "lever"
+    ? `https://api.lever.co/v0/postings/${token}?mode=json`
+    : `https://${API_HOST}/v1/boards/${token}/jobs?content=true`;
 }
 export function sqlLiteral(value: string) {
   return "'" + value.replace(/'/g, "''") + "'";
@@ -87,8 +89,8 @@ export async function boundedFetch(
   const parsed = new URL(url);
   if (
     parsed.protocol !== "https:" ||
-    parsed.hostname !== API_HOST ||
-    parsed.port
+    ![API_HOST, "api.lever.co"].includes(parsed.hostname) ||
+    parsed.port || parsed.username || parsed.password
   )
     throw Error("Unapproved discovery host");
   const r = await fetcher(url, {
@@ -115,24 +117,24 @@ export async function boundedFetch(
   return { status: r.status, body: Buffer.concat(chunks).toString("utf8") };
 }
 export async function discoverBoard(
-  source: { board_token: string; label: string; keywords: string[] },
+  source: { board_token: string; label: string; keywords: string[]; provider?: "greenhouse" | "lever" },
   fetcher: typeof fetch = fetch,
   now = new Date(),
 ) {
-  const url = boardURL(source.board_token),
+  const url = boardURL(source.board_token, source.provider),
     robots = await boundedFetch(
-      `https://${API_HOST}/robots.txt`,
+      `${new URL(url).origin}/robots.txt`,
       128000,
       fetcher,
     );
   if (
     robots.status !== 404 &&
-    (robots.status !== 200 || !robotsAllows(robots.body, new URL(url).pathname))
+    (robots.status !== 200 || !robotsAllows(robots.body, new URL(url).pathname + new URL(url).search))
   )
     return {
       state: "skipped" as const,
       detail: "Robots unavailable or disallows API path; no jobs requested.",
-      jobs: [],
+      jobs: [], observed_ids: [], complete: false,
     };
   if (
     robots.status === 200 &&
@@ -142,19 +144,20 @@ export async function discoverBoard(
       state: "skipped" as const,
       detail:
         "Robots specifies crawl delay; manual review required before automated access.",
-      jobs: [],
+      jobs: [], observed_ids: [], complete: false,
     };
   const response = await boundedFetch(url, 4 * 1024 * 1024, fetcher);
   if (response.status === 429)
     return {
       state: "skipped" as const,
       detail: "Provider rate limited request; no immediate retry.",
-      jobs: [],
+      jobs: [], observed_ids: [], complete: false,
     };
   if (response.status !== 200)
     throw Error(`Provider returned HTTP ${response.status}`);
   const data = JSON.parse(response.body);
-  if (!Array.isArray(data.jobs) || data.jobs.length > 5000)
+  const records = source.provider === "lever" ? data : data.jobs;
+  if (!Array.isArray(records) || records.length > 5000)
     throw Error("Invalid or oversized provider payload");
   const today = new Intl.DateTimeFormat("en-CA", {
     timeZone: "Europe/London",
@@ -162,8 +165,20 @@ export async function discoverBoard(
     month: "2-digit",
     day: "2-digit",
   }).format(now);
+  const observed_ids: string[] = records.filter(j => j && ["string", "number"].includes(typeof j.id)).map(j => String(j.id));
+  const complete = observed_ids.length === records.length && new Set(observed_ids).size === records.length &&
+    observed_ids.every(id => id.length > 0 && id.length <= 200) &&
+    (source.provider === "lever" || data.meta?.total === undefined || data.meta.total === records.length);
   const jobs = [];
-  for (const j of data.jobs) {
+  for (const original of records) {
+    if (!original || typeof original !== "object") continue;
+    const j = source.provider === "lever" ? {
+      id: original.id, title: original.text, absolute_url: original.hostedUrl,
+      location: {name: original.categories?.location || ""},
+      content: [original.descriptionPlain || original.description || "",
+        ...(Array.isArray(original.lists) ? original.lists.map((l: {text?: string; content?: string}) => `${l.text || ""}\n${l.content || ""}`) : []),
+        original.additionalPlain || original.additional || ""].join("\n"),
+    } : original;
     if (
       typeof j.title !== "string" ||
       typeof j.content !== "string" ||
@@ -172,13 +187,9 @@ export async function discoverBoard(
     )
       continue;
     const location = String(j.location?.name || "").slice(0, 500);
-    if (
-      !/\blondon\b/i.test(location) &&
-      !/remote.{0,30}(UK|United Kingdom)|(UK|United Kingdom).{0,30}remote/i.test(
-        location,
-      )
-    )
-      continue;
+    const london = /\blondon\b/i.test(location) && !/\b(?:ontario|canada|connecticut|united states|south africa|ohio|new london)\b/i.test(location);
+    const ukRemote = /remote.{0,30}\b(?:UK|United Kingdom)\b|\b(?:UK|United Kingdom)\b.{0,30}remote/i.test(location);
+    if (!london && !ukRemote) continue;
     const raw_jd = htmlText(j.content);
     if (
       raw_jd.length < 20 ||
@@ -192,7 +203,9 @@ export async function discoverBoard(
     } catch {
       continue;
     }
-    if (link.protocol !== "https:") continue;
+    if (link.protocol !== "https:" || link.username || link.password) continue;
+    link.hash = "";
+    for (const key of [...link.searchParams.keys()]) if (/^utm_/i.test(key)) link.searchParams.delete(key);
     const analysis = analyseJD(raw_jd);
     if (analysis.deadline_date && analysis.deadline_date < today) continue;
     jobs.push({
@@ -212,6 +225,6 @@ export async function discoverBoard(
     state: "success" as const,
     detail:
       "Official API listing; employer availability and eligibility still require human verification.",
-    jobs: jobs.slice(0, 100),
+    jobs: jobs.slice(0, 100), observed_ids, complete,
   };
 }

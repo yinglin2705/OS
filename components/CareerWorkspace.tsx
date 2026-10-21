@@ -24,6 +24,7 @@ type Job = {
   policy_reviewed_at: string | null;
   last_seen_at: string | null;
   availability: string;
+  source_changed_at?: string | null;
   origin: string;
   updated_at: string;
 };
@@ -38,6 +39,7 @@ type Doc = {
   analysis_snapshot?: { raw_jd?: string };
 };
 type Source = {
+  provider: string;
   id: string;
   label: string;
   board_token: string;
@@ -112,6 +114,7 @@ const emptyJob = {
   raw_jd: "",
 };
 const emptySource = {
+  provider: "greenhouse",
   label: "",
   board_token: "",
   keywords: "design, creative, art, production, studio, museum, theatre",
@@ -139,7 +142,8 @@ export default function CareerWorkspace() {
   const [selected, setSelected] = useState(""),
     [query, setQuery] = useState(""),
     [statusFilter, setFilter] = useState("all"),
-    [flexOnly, setFlex] = useState(false);
+    [flexOnly, setFlex] = useState(false),
+    [includeClosed, setIncludeClosed] = useState(false);
   const [claimForm, setClaimForm] = useState(emptyClaim),
     [claimId, setClaimId] = useState(""),
     [jobForm, setJobForm] = useState(emptyJob),
@@ -152,6 +156,8 @@ export default function CareerWorkspace() {
     [match, setMatch] = useState<Match | null>(null),
     [docs, setDocs] = useState<Doc[]>([]),
     [document, setDocument] = useState<Doc | null>(null);
+  const [observations, setObservations] = useState<{id: string; raw_jd: string; source_url: string; observed_at: string}[]>([]);
+  const [matchRuns, setMatchRuns] = useState<{id: string; result: Match; created_at: string}[]>([]);
   const [policy, setPolicy] = useState({
       decision: "unknown",
       source_url: "",
@@ -164,6 +170,7 @@ export default function CareerWorkspace() {
   const lock = useRef(false),
     request = useRef(0);
   const job = jobs.find((j) => j.id === selected);
+  const profileRevision = JSON.stringify(claims);
   async function load() {
     const db = browserDB();
     const results = await Promise.all([
@@ -187,7 +194,7 @@ export default function CareerWorkspace() {
     ]);
     if (results.some((r) => r.error))
       throw Error(
-        "职业模块无法读取。请先完成007数据库迁移；日历等模块不受影响。",
+        "职业模块无法读取。请先完成007和010数据库迁移；日历等模块不受影响。",
       );
     setClaims(results[0].data || []);
     setJobs(results[1].data || []);
@@ -242,6 +249,8 @@ export default function CareerWorkspace() {
     setMatch(null);
     setDocs([]);
     setDocument(null);
+    setObservations([]);
+    setMatchRuns([]);
     setEvidence([]);
     if (!job) return;
     setPolicy({
@@ -256,11 +265,17 @@ export default function CareerWorkspace() {
         if (request.current === current) {
           setAnalysis(d.analysis);
           setMatch(d.match);
+          browserDB().from("career_match_runs").select("id,result,created_at").eq("opportunity_id", job.id).order("created_at", {ascending:false}).limit(20).then(r => {
+            if (request.current === current && !r.error) setMatchRuns(r.data || []);
+          });
         }
       })
       .catch((e) => {
         if (request.current === current) setMessage(e.message);
       });
+    browserDB().from("career_job_observations").select("id,raw_jd,source_url,observed_at").eq("opportunity_id",job.id).order("observed_at",{ascending:false}).limit(10).then(r => {
+      if (request.current === current && !r.error) setObservations(r.data || []);
+    });
     browserDB()
       .from("career_documents")
       .select("*")
@@ -273,7 +288,7 @@ export default function CareerWorkspace() {
           else setDocs(r.data || []);
         }
       });
-  }, [selected, job?.updated_at, claims]);
+  }, [selected, job?.updated_at, profileRevision]);
   async function remove(table: string, id: string, explanation: string) {
     if (!window.confirm(explanation + " 永久删除，不能撤销。")) return;
     const ok = await mutate({ action: "delete", table, id }, "已删除。");
@@ -293,7 +308,9 @@ export default function CareerWorkspace() {
         reviewed_at: job.policy_reviewed_at,
       }
     : null;
-  const gate = canDraft(policyValue);
+  const gate = job?.availability === "closed" || job?.source_changed_at
+    ? { allowed: false, reason: "岗位已关闭或来源 JD 已变化；请先核实最新来源。" }
+    : canDraft(policyValue);
   const exportSafe =
     !!document &&
     gate.allowed &&
@@ -312,6 +329,7 @@ export default function CareerWorkspace() {
   const filtered = jobs
     .filter(
       (j) =>
+        (includeClosed || (j.availability !== "closed" && (!j.analysis?.deadline_date || j.analysis.deadline_date >= new Intl.DateTimeFormat("en-CA", {timeZone:"Europe/London"}).format(new Date())))) &&
         (statusFilter === "all" || j.status === statusFilter) &&
         (!flexOnly || j.analysis?.flexible) &&
         (j.title + " " + j.employer + " " + j.location)
@@ -600,6 +618,7 @@ export default function CareerWorkspace() {
               />
               只看明确兼职 / 弹性
             </label>
+            <label className="career-check"><input type="checkbox" checked={includeClosed} onChange={e => setIncludeClosed(e.target.checked)} />包含已关闭 / 已截止职位</label>
             <button
               onClick={() => {
                 setShowJob(!showJob);
@@ -720,6 +739,8 @@ export default function CareerWorkspace() {
                     {j.analysis?.flexible ? "兼职 / 弹性" : "工时需核实"}
                   </small>
                   <small>
+                    {j.availability === "closed" && <strong>来源已关闭 · </strong>}
+                    {j.source_changed_at && <strong>来源已更新，待复核 · </strong>}
                     {j.last_seen_at
                       ? `API见到：${localTime(j.last_seen_at)}`
                       : "招聘有效性待核实"}
@@ -842,6 +863,11 @@ export default function CareerWorkspace() {
                           </p>
                         )}
                         <p className="muted">{match?.explanation}</p>
+                        <details><summary>历史匹配快照（最近20次）</summary>{matchRuns.map(run => <div key={run.id}>
+                          <span>{localTime(run.created_at)} · {run.result.score ?? "未知"} 分</span>
+                          <details><summary>查看当时的证据与解释</summary><pre>{JSON.stringify(run.result,null,2)}</pre></details>
+                          <button disabled={busy} onClick={async () => {if (await mutate({action:"delete",table:"career_match_runs",id:run.id},"已删除匹配快照。")) setMatchRuns(rows=>rows.filter(r=>r.id!==run.id));}}>删除快照</button>
+                        </div>)}</details>
                         {match?.rows.map((r, i) => (
                           <article className="career-requirement" key={i}>
                             <span className="tag">{r.kind}</span>
@@ -1036,6 +1062,14 @@ export default function CareerWorkspace() {
                     <p className="muted">
                       MVP生成可追溯的证据型草稿，不进行自由扩写。请自行补充动机与叙述；不会编造经历、年限或资格。
                     </p>
+                    {job.source_changed_at && <div className="notice">
+                      <p>保留的 JD 与最新来源不同；更新会保留历史材料并重置 AI 政策审核。</p>
+                      {observations[0] && <details><summary>预览最新来源 JD · {localTime(observations[0].observed_at)}</summary><a href={observations[0].source_url} target="_blank" rel="noopener noreferrer">查看来源 ↗</a><pre>{observations[0].raw_jd}</pre></details>}
+                      <button disabled={busy || !observations.length} onClick={async () => {
+                        if (window.confirm("采用最新来源 JD？旧材料保留，但需重新核实雇主 AI 政策。"))
+                          await mutate({ action: "adopt_source", id: job.id, observation_id: observations[0].id, approved: true }, "JD 已更新，请重新核实政策。");
+                      }}>确认采用最新 JD</button>
+                    </div>}
                     <fieldset disabled={busy || !gate.allowed}>
                       <legend>选择本职位使用的已核实资料</legend>
                       {claims
@@ -1140,17 +1174,18 @@ export default function CareerWorkspace() {
                         )}
                         <button
                           disabled={!exportSafe}
-                          onClick={() => {
+                          onClick={async () => {
                             if (!exportSafe) return;
                             if (
                               window.confirm(
                                 "导出前确认：此版本可能包含个人信息，且仍需本人核实事实、雇主最新政策和格式。继续下载到本人设备？",
                               )
-                            )
-                              download(
-                                `career-${document.kind}-v${document.version}.md`,
-                                document.body,
-                              );
+                            ) {
+                              try {
+                                const exported = await api({ action: "export", id: document.id, approved: true });
+                                download(`career-${document.kind}-v${document.version}.md`, exported.data);
+                              } catch (e) { setMessage(e instanceof Error ? e.message : "导出验证失败"); }
+                            }
                           }}
                         >
                           本人审阅后导出 Markdown
@@ -1182,7 +1217,7 @@ export default function CareerWorkspace() {
           <section className="panel">
             <h2>{sourceId ? "编辑已批准来源" : "批准一个发现来源"}</h2>
             <p className="muted">
-              仅支持 Greenhouse 官方 Job Board
+              支持 Greenhouse 与 Lever 官方职位 API
               API，不抓取任意招聘网站。请先阅读该来源条款，确认允许此用途；启用表示批准后台只读获取公开职位。不会发送你的职业资料。
             </p>
             <form
@@ -1222,7 +1257,13 @@ export default function CareerWorkspace() {
                 />
               </label>
               <label>
-                Greenhouse board token
+                职位平台
+                <select aria-label="职位平台" value={sourceForm.provider} disabled={!!sourceId} onChange={(e) => setSourceForm({ ...sourceForm, provider: e.target.value })}>
+                  <option value="greenhouse">Greenhouse</option><option value="lever">Lever</option>
+                </select>
+              </label>
+              <label>
+                官方职位平台标识
                 <input
                   required
                   pattern="[a-zA-Z0-9_-]{1,80}"
@@ -1233,7 +1274,7 @@ export default function CareerWorkspace() {
                       board_token: e.target.value,
                     })
                   }
-                  placeholder="官方boards.greenhouse.io/之后的标识"
+                  placeholder="官方 boards.greenhouse.io/ 或 jobs.lever.co/ 之后的标识"
                 />
               </label>
               <label>

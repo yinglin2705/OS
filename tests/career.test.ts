@@ -240,3 +240,36 @@ describe("approved official discovery boundaries", () => {
     ).toBe("Design\nEssential");
   });
 });
+
+describe("career hardening", () => {
+  it("withholds coverage for negated experience, unsupported years and eligibility", () => {
+    const a = analyseJD("Essential:\nC4D skills required\n3 years C4D experience required\nRight to work in the UK required");
+    const m = matchJob(a, [claim]);
+    expect(m.rows[0].evidence).toHaveLength(1);
+    expect(m.rows[1].evidence).toHaveLength(0);
+    expect(m.rows[2].evidence).toHaveLength(0);
+    expect(matchJob(a, [{...claim, statement: "No experience with C4D"}]).score).toBe(0);
+  });
+  it("reads approved Lever feeds and retains complete identity lists before filtering", async () => {
+    const fetcher = vi.fn().mockResolvedValueOnce(new Response("", {status:404})).mockResolvedValueOnce(Response.json([
+      {id:"london",text:"Design assistant",hostedUrl:"https://jobs.lever.co/fixture/london?utm_source=test",categories:{location:"London"},descriptionPlain:"Part-time design role, 16 hours per week."},
+      {id:"other",text:"Design assistant",hostedUrl:"https://jobs.lever.co/fixture/other",categories:{location:"Paris"},descriptionPlain:"Design role based in Paris only."},
+    ]));
+    const r = await discoverBoard({provider:"lever",board_token:"fixture",label:"Fixture",keywords:["design"]}, fetcher);
+    expect(r.jobs).toHaveLength(1);
+    expect(r.jobs[0].source_url).not.toContain("utm_");
+    expect(r.observed_ids).toEqual(["london","other"]);
+    expect(r.complete).toBe(true);
+    expect(fetcher.mock.calls[0][0]).toBe("https://api.lever.co/robots.txt");
+  });
+  it("does not infer closure from incomplete Greenhouse feeds", async () => {
+    const fetcher = vi.fn().mockResolvedValueOnce(new Response("", {status:404})).mockResolvedValueOnce(Response.json({jobs:[],meta:{total:10}}));
+    const r = await discoverBoard({board_token:"fixture",label:"Fixture",keywords:["design"]},fetcher);
+    expect(r.complete).toBe(false);
+  });
+});
+
+it("does not mistake London Ontario or Ukraine remote for London/UK jobs", async () => {
+  const fetcher = vi.fn().mockResolvedValueOnce(new Response("", {status:404})).mockResolvedValueOnce(Response.json({jobs:["London, Ontario, Canada", "Remote Ukraine"].map((location,id)=>({id,title:"Design role",location:{name:location},content:"A creative design assistant role with flexible hours.",absolute_url:`https://example.org/job/${id}`}))}));
+  expect((await discoverBoard({board_token:"fixture",label:"Fixture",keywords:["design"]},fetcher)).jobs).toHaveLength(0);
+});

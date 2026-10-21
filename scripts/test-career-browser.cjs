@@ -126,6 +126,8 @@ if (!["localhost", "127.0.0.1"].includes(new URL(base).hostname))
       career_documents: docs,
       career_application_history: [],
       career_discovery_runs: [],
+      career_match_runs: [],
+      career_job_observations: [],
     }[path.split("/").at(-1)];
     if (!data) throw Error("Unexpected Supabase fixture endpoint");
     return route.fulfill({ json: data });
@@ -150,6 +152,10 @@ if (!["localhost", "127.0.0.1"].includes(new URL(base).hostname))
           },
         },
       });
+    if (b.action === "export") {
+      assert.equal(b.approved, true);
+      return route.fulfill({json:{data:docs.find(d=>d.id===b.id).body}});
+    }
     if (b.action === "policy")
       Object.assign(jobs[0], {
         policy_decision: b.data.decision,
@@ -244,6 +250,10 @@ if (!["localhost", "127.0.0.1"].includes(new URL(base).hostname))
       .isEnabled(),
     true,
   );
+  const downloaded = page.waitForEvent("download");
+  await page.getByRole("button", {name:"本人审阅后导出 Markdown",exact:true}).click();
+  await downloaded;
+  assert.equal(calls.find(c=>c.action === "export").approved,true);
   assert.equal(jobs[0].status, "saved");
   await page.locator('select[name="status"]').selectOption("shortlisted");
   await page.getByRole("button", { name: "保存进度", exact: true }).click();
@@ -290,8 +300,9 @@ if (!["localhost", "127.0.0.1"].includes(new URL(base).hostname))
   await page
     .getByRole("button", { name: "发现来源与运行记录", exact: true })
     .click();
+  await page.getByRole("combobox", {name:/职位平台/}).selectOption("lever");
   await page.getByLabel("雇主名称 / 来源名称").fill("Fixture studio");
-  await page.getByLabel("Greenhouse board token").fill("fixture-studio");
+  await page.getByLabel("官方职位平台标识").fill("fixture-studio");
   await page
     .getByLabel("已阅读的API / 来源条款链接")
     .fill("https://example.org/api-terms");
@@ -315,6 +326,7 @@ if (!["localhost", "127.0.0.1"].includes(new URL(base).hostname))
     )
     .waitFor();
   assert.equal(calls.find((c) => c.action === "source").data.approved, true);
+  assert.equal(calls.find((c) => c.action === "source").data.provider, "lever");
   assert(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= innerWidth + 2,
@@ -336,6 +348,8 @@ if (!["localhost", "127.0.0.1"].includes(new URL(base).hostname))
       no_automatic_application: true,
       manual_status: true,
       source_approval: true,
+      lever_source_selection: true,
+      approved_database_export: true,
       opportunity_delete: true,
       mobile_layout: true,
       page_errors: errors.length,

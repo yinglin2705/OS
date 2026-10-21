@@ -69,14 +69,11 @@ describe("complete career discovery command with isolated network", () => {
     expect(
       r.calls.filter((c) => c.host === "boards-api.greenhouse.io"),
     ).toHaveLength(2);
-    const insert = queries.find((q) => q.includes("with candidates"))!;
-    expect(insert).toContain("on conflict(user_id,source_url) do nothing");
-    expect(insert).toContain("s.enabled and s.approved_at is not null");
-    const update = queries.find((q) =>
-      q.startsWith("update public.career_opportunities"),
-    )!;
-    expect(update).not.toContain("set raw_jd");
-    expect(update).not.toContain("status=");
+    const ingest = queries.find((q) => q.includes("career_ingest_discovery"))!;
+    expect(ingest).toContain("2026-10-19T08:00:00Z");
+    expect(ingest).toContain('"external_id":"1"');
+    expect(ingest).toContain("true) as added");
+    expect(queries.some(q => q.includes("update public.career_opportunities"))).toBe(false);
     expect(queries.some((q) => q.includes("career_discovery_runs"))).toBe(true);
     expect(r.stdout).not.toContain("fixture-secret-never-log");
     expect(r.stdout).not.toContain("Fixture Studio");

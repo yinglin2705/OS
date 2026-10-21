@@ -88,3 +88,16 @@ it("rejects overlarge streaming payloads before querying career data", async () 
   expect(r.status).toBe(413);
   expect(m.from).not.toHaveBeenCalled();
 });
+it("requires human approval before export or adopting a changed source", async () => {
+  for (const action of ["export", "adopt_source"]) {
+    const response = await POST(req({action,id:"60000000-0000-4000-8000-000000000001"}));
+    expect(response.status).toBe(400);
+  }
+  expect(m.rpc).not.toHaveBeenCalled();
+});
+it("exports only through the database gate after explicit approval", async () => {
+  m.rpc.mockResolvedValue({data:"verified fixture draft",error:null});
+  const response = await POST(req({action:"export",id:"60000000-0000-4000-8000-000000000001",approved:true}));
+  expect(response.status).toBe(200);
+  expect(m.rpc).toHaveBeenCalledWith("career_export_document",{target:"60000000-0000-4000-8000-000000000001"});
+});

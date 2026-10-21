@@ -183,12 +183,18 @@ export function matchJob(analysis: Analysis, claims: Claim[]) {
       c.source_text.trim() &&
       c.verified_at,
   );
+  const negative = /\b(?:no|without|lack(?:ing)?|not yet|never)\b.{0,55}\b(?:experience|knowledge|skills?|qualification|degree)\b|\b(?:do not|cannot|can.t)\b|没有|尚未|不会/i;
+  const years = (text: string) => Number(text.match(/\b(\d+(?:\.\d+)?)\s*\+?\s*years?\b/i)?.[1] || 0);
   const rows = analysis.requirements.map((r) => ({
     ...r,
     evidence: verified
       .filter((c) =>
         c.keywords.some(
           (k) =>
+            !negative.test(c.statement) && !negative.test(c.source_text) &&
+            (!years(r.quote) || (years(c.statement) >= years(r.quote) && years(c.source_text) >= years(r.quote))) &&
+            (!/\b(?:degree|bachelor|master|phd|doctorate)\b/i.test(r.quote) || c.kind === "education") &&
+            !/\b(?:right to work|visa|sponsorship|security clearance|DBS)\b/i.test(r.quote) &&
             phraseIn(r.quote, k) &&
             phraseIn(c.statement, k) &&
             phraseIn(c.source_text, k),
@@ -227,7 +233,7 @@ export function matchJob(analysis: Analysis, claims: Claim[]) {
     desirableCoverage,
     flexibilityPoints: analysis.flexible ? 10 : 0,
     explanation:
-      "按已核实原文关键词计算证据覆盖：essential 75、desirable 15、兼职/弹性10；缺失要求类别不计入分母。关键词重合不是达到经验年限等完整要求的证明，缺少证据不等于不具备能力。不是录用概率。",
+      "按已核实原文关键词计算证据覆盖：essential 75、desirable 15、兼职/弹性10；缺失要求类别不计入分母。否定经历、缺少年限证据和非教育资料不计相关要求分；资格许可必须人工核实。关键词重合不是满足完整要求的证明，缺少证据不等于不具备能力。不是录用概率。",
     generated_at: new Date().toISOString(),
   };
 }
@@ -251,7 +257,7 @@ export function canDraft(policy: Policy | null) {
   // Restrictive language wins even if the user selected allowed.
   if (
     /(?:do not|must not|not allowed|prohibit|ban(?:ned)?|no use of|without|不得|禁止|不允许).{0,100}(?:AI|artificial intelligence|生成式)|(?:AI|artificial intelligence).{0,80}(?:prohibit|not permitted|not allowed|must not|禁止)/i.test(
-      policy.quote,
+      policy.quote.replace(/\s+/g, " "),
     )
   )
     return {

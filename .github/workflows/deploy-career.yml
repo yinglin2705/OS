@@ -4,6 +4,7 @@ on:
     branches: [main]
     paths:
       - supabase/migrations/007_career_agent.sql
+      - supabase/migrations/010_career_hardening.sql
       - scripts/deploy-career.mjs
       - .github/workflows/deploy-career.yml
   workflow_dispatch:

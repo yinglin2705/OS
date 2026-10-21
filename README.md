@@ -154,7 +154,7 @@ SQL Editor 管理员执行时没有用户会话，需使用你本人 user_id 过
 
 `/career` adds a private, source-backed Master Career Profile, London creative-role shortlist, JD analysis, transparent evidence coverage, employer AI-policy gating, evidence-template CV/cover letter/personal statement versions and manually recorded application progress. It never submits applications or sends emails. No personal experience or qualifications are seeded or invented.
 
-Migration007 and `deploy-career.yml` reuse the existing Supabase/GitHub deployment convention. `career-discovery.yml` performs daily read-only discovery from explicitly approved official Greenhouse feeds; no arbitrary scraping or outbound profile sharing. Model-based matching, polished generative writing and broad web search remain unimplemented. See [Career Agent architecture, operation and deployment](docs/CAREER_AGENT.md) for approval boundaries, testing and live-verification requirements.
+Migrations007/010 and `deploy-career.yml` reuse the existing Supabase/GitHub deployment convention. `career-discovery.yml` performs daily read-only discovery from explicitly approved official Greenhouse/Lever feeds; no arbitrary scraping or outbound profile sharing. Provider observations flag changed JDs, stable IDs prevent URL-change duplicates, and complete feeds can mark closed listings. Matching snapshots persist privately, and database gates protect draft creation/export. Model-based matching, polished generative writing and broad web search remain unimplemented. See [Career Agent architecture, operation and deployment](docs/CAREER_AGENT.md) for approval boundaries, testing and live-verification requirements.
 
 ## 日历确认与状态修改
 

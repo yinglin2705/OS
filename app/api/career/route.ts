@@ -75,6 +75,12 @@ export async function POST(req: Request) {
         throw Error("资料超过单次分析上限，请先整理。");
       const analysis = analyseJD(job.data.raw_jd);
       const match = matchJob(analysis, claims.data || []);
+      const saved = await db.from("career_match_runs").insert({
+        opportunity_id: id, analysis, result: match,
+        profile_snapshot: claims.data || [],
+        job_snapshot: { raw_jd: job.data.raw_jd, title: job.data.title, employer: job.data.employer, source_url: job.data.source_url },
+      });
+      if (saved.error) throw Error("分析未能保存，请检查 Career 数据库迁移。");
       return NextResponse.json({ analysis, match });
     } else if (b.action === "policy") {
       const p = policyInput.parse(b.data);
@@ -102,6 +108,12 @@ export async function POST(req: Request) {
         document_kind: p.kind,
         claim_ids: p.claim_ids,
       });
+    } else if (b.action === "export") {
+      if (b.approved !== true) throw Error("请先本人确认导出。");
+      result = await db.rpc("career_export_document", { target: z.string().uuid().parse(b.id) });
+    } else if (b.action === "adopt_source") {
+      if (b.approved !== true) throw Error("请先确认更新 JD，更新后须重新核实政策。");
+      result = await db.rpc("career_adopt_observation", { target: z.string().uuid().parse(b.id), observation: z.string().uuid().parse(b.observation_id) });
     } else if (b.action === "status") {
       const status = z
         .enum([
@@ -133,6 +145,7 @@ export async function POST(req: Request) {
       const p = z
         .object({
           label: z.string().trim().min(1).max(200),
+          provider: z.enum(["greenhouse", "lever"]).default("greenhouse"),
           board_token: z.string().regex(/^[a-zA-Z0-9_-]{1,80}$/),
           keywords: z.array(z.string().trim().min(2).max(80)).min(1).max(20),
           terms_url: z
@@ -164,6 +177,8 @@ export async function POST(req: Request) {
           "career_documents",
           "career_application_history",
           "career_discovery_runs",
+          "career_match_runs",
+          "career_job_observations",
         ])
         .parse(b.table);
       result = await db

@@ -38,7 +38,7 @@ for (const source of sources) {
     if (
       !source.enabled ||
       !source.approved_at ||
-      source.provider !== "greenhouse" ||
+      !["greenhouse", "lever"].includes(source.provider) ||
       !Array.isArray(source.keywords) ||
       source.keywords.length < 1 ||
       source.keywords.length > 20
@@ -48,24 +48,11 @@ for (const source of sources) {
     state = result.state;
     detail = result.detail;
     seen = result.jobs.length;
-    if (result.jobs.length) {
-      // Guard authorization again at write time: disabling/deleting the source while
-      // discovery runs prevents new inserts. Discovery never overwrites JD, policy,
-      // drafts, notes or manually updated application progress.
-      const rows = result.jobs
-        .map(
-          (j) =>
-            `(${sqlLiteral(source.user_id)}::uuid,${sqlLiteral(source.id)}::uuid,${sqlLiteral(j.external_id)},${sqlLiteral(j.title)},${sqlLiteral(j.employer)},${sqlLiteral(j.location)},${sqlLiteral(j.source_url)},${sqlLiteral(j.raw_jd)},${sqlLiteral(JSON.stringify(j.analysis))}::jsonb)`,
-        )
-        .join(",");
+    if (result.state === "success") {
       const written = await query(
-        `with candidates(user_id,source_id,external_id,title,employer,location,source_url,raw_jd,analysis) as (values ${rows}), inserted as (insert into public.career_opportunities(user_id,source_id,external_id,title,employer,location,source_url,raw_jd,analysis,origin,last_seen_at,availability) select c.*,'greenhouse',now(),'listed' from candidates c join public.career_sources s on s.id=c.source_id and s.user_id=c.user_id where s.enabled and s.approved_at is not null on conflict(user_id,source_url) do nothing returning id) select count(*) as added from inserted;`,
+        `select public.career_ingest_discovery(${sqlLiteral(source.id)}::uuid,${sqlLiteral(source.approved_at)}::timestamptz,${sqlLiteral(JSON.stringify(result.jobs))}::jsonb,${sqlLiteral(JSON.stringify(result.observed_ids))}::jsonb,${result.complete}) as added;`,
       );
       added = Number(written[0]?.added || 0);
-      const urls = result.jobs.map((j) => sqlLiteral(j.source_url)).join(",");
-      await query(
-        `update public.career_opportunities j set last_seen_at=now(),availability='listed' where j.user_id=${sqlLiteral(source.user_id)}::uuid and j.source_id=${sqlLiteral(source.id)}::uuid and j.source_url in (${urls}) and exists(select 1 from public.career_sources s where s.id=j.source_id and s.enabled and s.approved_at is not null);`,
-      );
     }
   } catch {
     state = "failed";
